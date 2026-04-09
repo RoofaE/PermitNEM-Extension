@@ -245,8 +245,6 @@ Rules:
   const raw  = json.content.map(b => b.text || '').join('').trim();
   const m    = raw.match(/\{[\s\S]*\}/);
   return JSON.parse(m ? m[0] : raw);
-}
-
 
 // ─── Merge CRM + AI data ──────────────────────────────────────────────────────
 
