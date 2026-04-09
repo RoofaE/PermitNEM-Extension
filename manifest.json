@@ -16,6 +16,7 @@
     "https://crm.zoho.com/*",
     "https://workdrive.zoho.com/*",
     "https://www.zohoapis.com/*",
+    "https://download-accl.zoho.com/*",
     "https://api.anthropic.com/*",
     "https://www.saskpower.com/*",
     "https://accounts.zoho.com/*"
