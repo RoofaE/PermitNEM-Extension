@@ -19,7 +19,10 @@
     "https://download-accl.zoho.com/*",
     "https://api.anthropic.com/*",
     "https://www.saskpower.com/*",
-    "https://accounts.zoho.com/*"
+    "https://accounts.zoho.com/*",
+    "https://download-accl.zoho.com/*",
+    "https://download.zoho.com/*",
+    "https://previewengine-accl.zoho.com/*"
   ],
 
   "action": {
