@@ -227,7 +227,10 @@ async function extractWithClaude(files, apiKey) {
 }
 
 Rules:
-- Bill names are LAST, FIRST - reverse them (SMITH, JOHN A means first=JOHN last=SMITH)
+- Bill names are LAST, FIRST format - you MUST reverse them. Example: "COTE, GASTON H." means person1_first=GASTON, person1_last=COTE, person1_middle_initial=H
+- person1_first must be ONLY the first name (e.g. GASTON), never the full name
+- person1_last must be ONLY the last name (e.g. COTE), never the full name
+- The FIRST person listed on the bill is person1, the SECOND person is person2
 - Two people are often listed on the bill - extract both
 - Mailing address is at BOTTOM of bill
 - Count DS3-H inverters from SLD
@@ -287,7 +290,8 @@ function mergeData(extracted, dealData, files) {
     person1_email:           dealData.email  || '',
     person1_phone:           dealData.phone  || '',
     person1_mailing_address: dealData.streetAddress || `${extracted.house_number} ${extracted.street_name}`,
-    person1_city:            dealData.city         || extracted.city || '',
+    // person1_city:            dealData.city         || extracted.city || '',
+    person1_city: extracted.person1_city || extracted.city || dealData.city || '',
     person1_postal:          extracted.postal_code || '',
     has_second_person:       extracted.has_second_person || false,
     person2_first:           extracted.person2_first          || '',
