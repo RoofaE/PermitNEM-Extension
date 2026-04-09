@@ -163,10 +163,11 @@ async function fetchPermitFiles(rootFolderId) {
     errors.push('Permitting folder: ' + e.message);
   }
 
-  const missing = ['sld', 'siteplan', 'bill'].filter(k => !files[k]);
+  const missing = ['sld', 'siteplan'].filter(k => !files[k]);
   if (missing.length > 0) {
     throw new Error(`Could not find: ${missing.join(', ')}. Check WorkDrive folder structure.\n${errors.join('\n')}`);
   }
+  // spec sheet (bill) is optional — skip if not found
 
   return files;
 }
