@@ -28,16 +28,14 @@ async function init() {
   await waitFor('[data-sc-field-name="Location Type Input"]', 15000);
 
   // Get permit data from storage
-  const { permitData } = await chrome.storage.local.get('permitData');
+  const { permitData, permitFiles } = await chrome.storage.local.get(['permitData', 'permitFiles']);
   if (!permitData) {
     console.error('PermitFlow: No permit data found in storage.');
     return;
   }
-
-  console.log('PermitFlow: Starting form fill...', permitData);
-  await fillForm(permitData);
+  const fullData = { ...permitData, files: permitFiles };
+  await fillForm(fullData);
 }
-
 
 function waitFor(selector, timeout = 10000) {
   return new Promise((resolve, reject) => {
