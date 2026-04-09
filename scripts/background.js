@@ -60,8 +60,15 @@ async function getFirstFile(folderId) {
 
 async function downloadFile(downloadUrl) {
   const token = await getZohoToken();
-  const resp = await fetch(downloadUrl, { 
-    headers: { 'Authorization': `Zoho-oauthtoken ${token}` } 
+  // Add token as query parameter for download-accl domain
+  const url = downloadUrl.includes('?') 
+    ? `${downloadUrl}&authtoken=${token}`
+    : `${downloadUrl}?authtoken=${token}`;
+  const resp = await fetch(url, { 
+    headers: { 
+      'Authorization': `Zoho-oauthtoken ${token}`,
+      'X-ZCSRF-TOKEN': token
+    } 
   });
   if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
   const blob = await resp.blob();
