@@ -59,15 +59,22 @@ async function getFirstFile(folderId) {
 }
 
 async function downloadFile(downloadUrl, permalink) {
-  // Try permalink first (uses browser session, no auth needed)
+  // Try permalink with download flag
   if (permalink) {
     try {
-      const resp = await fetch(permalink, { credentials: 'include' });
+      const dlUrl = permalink.includes('?') 
+        ? `${permalink}&download=true` 
+        : `${permalink}?download=true`;
+      const resp = await fetch(dlUrl, { credentials: 'include' });
       if (resp.ok) {
-        const blob = await resp.blob();
-        const arrayBuf = await blob.arrayBuffer();
-        const uint8 = new Uint8Array(arrayBuf);
-        return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+        const ct = resp.headers.get('content-type') || '';
+        // Make sure we got a file, not an HTML page
+        if (!ct.includes('text/html')) {
+          const blob = await resp.blob();
+          const arrayBuf = await blob.arrayBuffer();
+          const uint8 = new Uint8Array(arrayBuf);
+          return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+        }
       }
     } catch(e) {}
   }
