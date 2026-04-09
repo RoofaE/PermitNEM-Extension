@@ -142,3 +142,29 @@ function showStatus(type, msg) {
 document.getElementById('runBtn').addEventListener('click', runPermit);
 document.querySelector('.settings-link').addEventListener('click', toggleSettings);
 document.querySelector('.settings-save').addEventListener('click', saveSettings);
+
+async function connectZoho() {
+  const clientId = '1000.52QV545IS2T3FDZU1Y85MHH6TJR5LU';
+  const redirectUri = chrome.identity.getRedirectURL();
+  const scope = 'ZohoWorkDrive.files.READ,ZohoWorkDrive.files.ALL';
+  
+  const authUrl = `https://accounts.zoho.com/oauth/v2/auth?response_type=token&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+
+  chrome.identity.launchWebAuthFlow(
+    { url: authUrl, interactive: true },
+    async (redirectUrl) => {
+      if (chrome.runtime.lastError || !redirectUrl) {
+        document.getElementById('connectStatus').textContent = 'Connection failed.';
+        return;
+      }
+      const match = redirectUrl.match(/access_token=([^&]+)/);
+      if (match) {
+        await chrome.storage.local.set({ zohoToken: match[1] });
+        document.getElementById('connectStatus').textContent = '✓ Connected!';
+        document.getElementById('connectStatus').style.color = '#22c55e';
+      }
+    }
+  );
+}
+
+document.getElementById('connectZohoBtn').addEventListener('click', connectZoho);
