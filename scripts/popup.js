@@ -49,7 +49,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function runPermit() {
-  const { apiKey } = await chrome.storage.local.get('apiKey');
+  const { apiKey, zohoClientId } = await chrome.storage.local.get(['apiKey', 'zohoClientId']);
+  if (apiKey) document.getElementById('apiKeyInput').value = apiKey;
+  if (zohoClientId) document.getElementById('clientIdInput').value = zohoClientId;
   if (!apiKey) {
     showStatus('error', 'No API key set. Click ⚙ Settings and add your Anthropic API key.');
     return;
