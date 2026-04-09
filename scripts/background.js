@@ -15,9 +15,22 @@ async function handleRunPermit(dealData, apiKey) {
   const folderId = extractFolderId(workdriveUrl);
   if (!folderId) throw new Error('Could not extract folder ID from WorkDrive URL.');
   const files = await fetchPermitFiles(folderId);
-  const extractedData = await extractWithClaude(files, apiKey);
+  const bill = await fetchBillForAI(folderId);
+  const extractedData = await extractWithClaude({ ...files, bill }, apiKey);
   const finalData = mergeData(extractedData, dealData, files);
   return { data: finalData };
+}
+
+async function fetchBillForAI(rootFolderId) {
+  const picsId = await findSubfolder(rootFolderId, 'Pics');
+  if (!picsId) throw new Error('Pics folder not found');
+  const billFoldId = await findSubfolder(picsId, 'Power Bill');
+  if (!billFoldId) throw new Error('Power Bill folder not found');
+  const billFile = await getFirstFile(billFoldId);
+  if (!billFile) throw new Error('No bill file found');
+  const file = await downloadFile(billFile.attributes?.download_url, billFile.attributes?.permalink);
+  file.filename = billFile.attributes?.name || 'bill.png';
+  return file;
 }
 
 function extractFolderId(url) {
@@ -115,34 +128,31 @@ async function fetchPermitFiles(rootFolderId) {
         }
       }
       const permItems = await workdriveList(permId);
+
+      // Site plan — first image file in Permitting
       const siteFile = permItems.find(i => {
         const name = (i.attributes?.name || '').toLowerCase();
         const type = i.attributes?.type;
-        return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
+        return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'));
       });
       if (siteFile) {
         files.siteplan = await downloadFile(siteFile.attributes?.download_url, siteFile.attributes?.permalink);
         files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
       }
-    }
-  } catch (e) {
-    errors.push('Permitting folder: ' + e.message);
-  }
-
-  try {
-    const picsId = await findSubfolder(rootFolderId, 'Pics');
-    if (picsId) {
-      const billFoldId = await findSubfolder(picsId, 'Power Bill');
-      if (billFoldId) {
-        const billFile = await getFirstFile(billFoldId);
-        if (billFile) {
-          files.bill = await downloadFile(billFile.attributes?.download_url, billFile.attributes?.permalink);
-          files.bill.filename = billFile.attributes?.name || 'bill.pdf';
-        }
+      
+      // Spec sheet — first PDF file in Permitting
+      const specFile = permItems.find(i => {
+        const name = (i.attributes?.name || '').toLowerCase();
+        const type = i.attributes?.type;
+        return type !== 'folder' && name.endsWith('.pdf');
+      });
+      if (specFile) {
+        files.bill = await downloadFile(specFile.attributes?.download_url, specFile.attributes?.permalink);
+        files.bill.filename = specFile.attributes?.name || 'specsheet.pdf';
       }
     }
   } catch (e) {
-    errors.push('Power Bill folder: ' + e.message);
+    errors.push('Permitting folder: ' + e.message);
   }
 
   const missing = ['sld', 'siteplan', 'bill'].filter(k => !files[k]);
