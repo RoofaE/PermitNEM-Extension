@@ -1,117 +1,98 @@
 'use strict';
 
-// Reads the current Zoho CRM Deal page and extracts client data
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action !== 'getDealData') return;
-
   try {
     const data = extractDealData();
     sendResponse({ success: true, data });
   } catch (err) {
     sendResponse({ success: false, error: err.message });
   }
-
-  return true; // keep channel open for async
+  return true;
 });
-
 
 function extractDealData() {
   const data = {};
 
-  // ── Client name ──
-  // Try the page heading first
-  const heading = document.querySelector('.zcrmRecordName, [data-field="Deal_Name"], .zc-ellipsis');
-  if (heading) {
-    data.clientName = heading.textContent.trim();
+  // ── Scrape all label/value pairs from the visible page ──
+  const fieldMap = {};
+
+  // Zoho renders fields as adjacent divs with label text + value text
+  // Look for elements containing field labels
+  document.querySelectorAll('.dv_info_label, .dv-info-label, [id*="labelTD"]').forEach(labelEl => {
+    const label = labelEl.textContent.trim().replace(/:$/, '');
+    if (!label) return;
+
+    // Value is usually in a sibling or nearby element
+    const parent = labelEl.closest('.dv_info_field, .flexOne, [class*="field_column"], div[class*="dv_field"]');
+    if (parent) {
+      const valueEl = parent.querySelector('.dv_info_value, [id*="value_"], [class*="dv_info_value"], span[id*="POTENTIAL"]');
+      if (valueEl) {
+        const value = valueEl.textContent.trim();
+        if (value && value !== '—' && value !== '') {
+          fieldMap[label] = value;
+        }
+      }
+    }
+  });
+
+  // Fallback — scan all text on page for known patterns
+  // Email — look for email links directly
+  const emailLink = document.querySelector('a[href^="mailto:"]');
+  if (emailLink) {
+    data.email = emailLink.textContent.trim() || emailLink.href.replace('mailto:', '');
   }
 
-  // ── Read all field label→value pairs on the page ──
-  const fieldMap = buildFieldMap();
-
-  // First Name + Last Name
-  const firstName = fieldMap['First Name'] || '';
-  const lastName  = fieldMap['Last Name']  || '';
-  if (firstName || lastName) {
-    data.clientName = `${firstName} ${lastName}`.trim();
-    data.firstName  = capitalize(firstName);
-    data.lastName   = capitalize(lastName);
+  // Phone — look for phone component value
+  const phoneEl = document.querySelector('.cxPhoneViewValue, [class*="PhoneValue"]');
+  if (phoneEl) {
+    data.phone = phoneEl.textContent.trim();
   }
 
-  // Email — use Email 1, fallback to Email 2
-  data.email = fieldMap['Email 1'] || fieldMap['Email'] || fieldMap['Email 2'] || '';
+  // Fallback phone — look for viewport value attribute
+  if (!data.phone) {
+    const phoneComp = document.querySelector('[viewportvalue]');
+    if (phoneComp) {
+      data.phone = phoneComp.getAttribute('viewportvalue');
+    }
+  }
 
-  // Phone — use Phone 1, fallback to Phone 2
-  data.phone = fieldMap['Phone 1'] || fieldMap['Phone'] || fieldMap['Phone 2'] || fieldMap['Mobile'] || '';
+  // Names — from page heading or field map
+  const nameEl = document.querySelector('[data-zqa="crm-detail-name"], .entity-name-field, [id*="POTENTIALNAME"] span');
+  if (nameEl) data.clientName = nameEl.textContent.trim();
+
+  // First/Last from CRM fields
+  data.firstName = fieldMap['First Name'] || '';
+  data.lastName  = fieldMap['Last Name']  || '';
+  if (data.firstName || data.lastName) {
+    data.clientName = `${data.firstName} ${data.lastName}`.trim();
+  }
 
   // Street address
   data.streetAddress = fieldMap['Street Address'] || '';
 
   // City
-  const cityProv = fieldMap['City & Province'] || fieldMap['City/Province'] || '';
+  const cityProv = fieldMap['City & Province'] || '';
   data.city = cityProv.split(',')[0].trim();
 
-  // WorkDrive folder URL
-  data.workdriveUrl = fieldMap['Workdrive Folder URL'] || fieldMap['WorkDrive Folder URL'] || fieldMap['Workdrive Folder Url'] || '';
+  // WorkDrive URL — most reliable, grab from anchor tag
+  const wdLink = document.querySelector('a[href*="workdrive.zoho.com/folder"]');
+  if (wdLink) data.workdriveUrl = wdLink.href;
 
-  // WorkDrive folder ID (backup)
-  data.workdriveFolderId = fieldMap['Workdrive Folder ID'] || fieldMap['WorkDrive Folder ID'] || '';
+  // Email fallback from field map
+  if (!data.email) {
+    data.email = fieldMap['Email 1'] || fieldMap['Email'] || '';
+  }
+
+  // Phone fallback from field map  
+  if (!data.phone) {
+    data.phone = fieldMap['Phone 2'] || fieldMap['Phone 1'] || fieldMap['Phone'] || '';
+  }
 
   // Deal ID from URL
   const urlMatch = window.location.href.match(/\/(\d+)\/?$/);
   data.dealId = urlMatch ? urlMatch[1] : '';
 
+  console.log('PermitFlow CRM data:', data);
   return data;
-}
-
-
-function buildFieldMap() {
-  const map = {};
-
-  // Zoho CRM renders fields as label + value pairs
-  // Try multiple selector patterns Zoho uses
-  const containers = document.querySelectorAll(
-    '.zcrmFieldContainer, .zc-field-container, [data-field], .zcrmLayoutField'
-  );
-
-  containers.forEach(container => {
-    const labelEl = container.querySelector(
-      '.zcrmFieldLabel, .zc-field-label, label, [class*="label"]'
-    );
-    const valueEl = container.querySelector(
-      '.zcrmFieldValue, .zc-field-value, [class*="value"], a, span:not([class*="label"])'
-    );
-
-    if (labelEl && valueEl) {
-      const label = labelEl.textContent.trim().replace(/:$/, '');
-      const value = valueEl.textContent.trim();
-      if (label && value && value !== '—' && value !== '-') {
-        map[label] = value;
-      }
-    }
-  });
-
-  // Also try the detail view table rows
-  document.querySelectorAll('tr.zcrmFieldRow, .zc-row').forEach(row => {
-    const cells = row.querySelectorAll('td, .zc-col');
-    if (cells.length >= 2) {
-      const label = cells[0].textContent.trim().replace(/:$/, '');
-      const value = cells[1].textContent.trim();
-      if (label && value && value !== '—') {
-        map[label] = value;
-      }
-    }
-  });
-
-  // Grab WorkDrive URL specifically from anchor tags
-  document.querySelectorAll('a[href*="workdrive.zoho.com"]').forEach(a => {
-    map['Workdrive Folder URL'] = a.href;
-  });
-
-  return map;
-}
-
-
-function capitalize(str) {
-  if (!str) return '';
-  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
