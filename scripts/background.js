@@ -53,7 +53,9 @@ async function findSubfolder(parentId, name) {
 
 async function getFirstFile(folderId) {
   const items = await workdriveList(folderId);
-  return items.find(i => i.attributes?.type !== 'folder') || null;
+  const file = items.find(i => i.attributes?.type !== 'folder') || null;
+  if (file) console.log('FILE FOUND:', JSON.stringify(file));
+  return file;
 }
 
 async function downloadFile(fileId) {
