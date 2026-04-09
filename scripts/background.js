@@ -19,8 +19,13 @@ async function handleRunPermit(dealData, apiKey) {
   const extractedData = await extractWithClaude({ ...files, bill }, apiKey);
   const finalData = mergeData(extractedData, dealData, files);
 
-  // Store directly in chrome.storage instead of passing through message (files too large)
-  await chrome.storage.local.set({ permitData: finalData });
+  // Store files separately using session storage keys
+  // Split into separate storage calls to avoid quota
+  const { files: fileData, ...dataWithoutFiles } = finalData;
+  
+  await chrome.storage.local.set({ permitData: dataWithoutFiles });
+  await chrome.storage.local.set({ permitFiles: fileData });
+  
   return { success: true };
 }
 
