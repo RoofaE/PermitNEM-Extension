@@ -78,7 +78,7 @@ async function runPermit() {
     }
 
     showStatus('info', 'Opening SaskPower form...');
-    await chrome.storage.local.set({ permitData: response.data });
+    // await chrome.storage.local.set({ permitData: response.data });
     chrome.tabs.create({ url: 'https://www.saskpower.com/forms/net-metering-application-form' });
     showStatus('success', '✅ Form is opening! Switch to the new tab to review.');
     document.getElementById('steps').style.display = 'block';
