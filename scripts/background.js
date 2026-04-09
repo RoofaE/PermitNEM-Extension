@@ -105,7 +105,8 @@ async function downloadFile(downloadUrl, permalink) {
           const blob = await resp.blob();
           const arrayBuf = await blob.arrayBuffer();
           const uint8 = new Uint8Array(arrayBuf);
-          return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+          const actualMimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
+          return { b64: compressedB64, filename: '', mimeType: actualMimeType };
         }
       }
     } catch(e) {}
@@ -194,7 +195,8 @@ async function extractWithClaude(files, apiKey) {
       const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream')
         ? file.mimeType
         : mt;
-      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: file.b64 } });
+      const finalMt = file.mimeType || mt;
+      content.push({ type: 'image', source: { type: 'base64', media_type: finalMt, data: file.b64 } });
     }
   }
 
