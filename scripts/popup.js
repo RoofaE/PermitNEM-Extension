@@ -4,10 +4,10 @@ let dealData = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Wire up all buttons first — always, regardless of page
-  document.getElementById('runBtn').addEventListener('click', runPermit);
-  document.querySelector('.settings-link').addEventListener('click', toggleSettings);
-  document.querySelector('.settings-save').addEventListener('click', saveSettings);
-  document.getElementById('connectZohoBtn').addEventListener('click', connectZoho);
+  document.getElementById('runBtn')?.addEventListener('click', runPermit);
+  document.querySelector('.settings-link')?.addEventListener('click', toggleSettings);
+  document.querySelector('.settings-save')?.addEventListener('click', saveSettings);
+  document.getElementById('connectZohoBtn')?.addEventListener('click', connectZoho);
 
   // Load saved API key
   const { apiKey } = await chrome.storage.local.get('apiKey');
