@@ -159,25 +159,27 @@ async function fetchPermitFiles(rootFolderId) {
 // ─── Claude AI Extraction ─────────────────────────────────────────────────────
 
 function getMediaType(filename) {
-  const ext = filename.split('.').pop().toLowerCase();
-  if (ext === 'pdf')              return 'application/pdf';
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  if (ext === 'pdf')                return 'application/pdf';
   if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png')                return 'image/png';
+  if (ext === 'webp')               return 'image/webp';
   return 'image/png';
 }
 
-
-async function extractWithClaude(files, apiKey) {
-  const content = [];
-
-  for (const key of ['bill', 'sld', 'siteplan']) {
-    const file = files[key];
-    const mt   = getMediaType(file.filename);
-    if (mt === 'application/pdf') {
-      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
-    } else {
-      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: file.b64 } });
-    }
+for (const key of ['bill', 'sld', 'siteplan']) {
+  const file = files[key];
+  const mt   = getMediaType(file.filename);
+  if (mt === 'application/pdf') {
+    content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
+  } else {
+    // Force image/jpeg if mimeType is unknown or generic
+    const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream') 
+      ? file.mimeType 
+      : mt;
+    content.push({ type: 'image', source: { type: 'base64', media_type: imageMt, data: file.b64 } });
   }
+}
 
   content.push({ type: 'text', text: `Extract fields from these solar permit documents. Return ONLY raw JSON.
 
