@@ -60,14 +60,29 @@ async function getFirstFile(folderId) {
 
 async function downloadFile(fileId) {
   const token = await getZohoToken();
-  const url = `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`;
-  const resp = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-  if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
-  const blob = await resp.blob();
-  const arrayBuf = await blob.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuf);
-  const b64 = uint8ToBase64(uint8);
-  return { b64, filename: '', mimeType: blob.type };
+  const endpoints = [
+    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
+    `https://www.zohoapis.com/workdrive/api/v1/download/${fileId}`,
+    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/exportStream`,
+  ];
+  
+  let lastError;
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const arrayBuf = await blob.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuf);
+        const b64 = uint8ToBase64(uint8);
+        return { b64, filename: '', mimeType: blob.type };
+      }
+      lastError = `${url} → ${resp.status}`;
+    } catch(e) {
+      lastError = `${url} → ${e.message}`;
+    }
+  }
+  throw new Error(`All download attempts failed: ${lastError}`);
 }
 
 function uint8ToBase64(uint8) {
