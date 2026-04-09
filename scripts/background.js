@@ -1,8 +1,5 @@
 'use strict';
 
-// Background service worker
-// Handles: WorkDrive file fetching + Claude AI extraction
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'runPermit') {
     handleRunPermit(msg.dealData, msg.apiKey)
@@ -12,31 +9,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-
-// ─── Main handler ─────────────────────────────────────────────────────────────
-
 async function handleRunPermit(dealData, apiKey) {
   const workdriveUrl = dealData.workdriveUrl;
   if (!workdriveUrl) throw new Error('No WorkDrive URL found on this deal.');
-
-  // 1. Get folder ID from URL
   const folderId = extractFolderId(workdriveUrl);
   if (!folderId) throw new Error('Could not extract folder ID from WorkDrive URL.');
-
-  // 2. Fetch files from WorkDrive
   const files = await fetchPermitFiles(folderId);
-
-  // 3. Extract data with Claude AI
   const extractedData = await extractWithClaude(files, apiKey);
-
-  // 4. Merge with CRM data
   const finalData = mergeData(extractedData, dealData, files);
-
   return { data: finalData };
 }
-
-
-// ─── WorkDrive ────────────────────────────────────────────────────────────────
 
 function extractFolderId(url) {
   const m = url.match(/\/folder\/([a-zA-Z0-9]+)/);
@@ -69,17 +51,15 @@ async function findSubfolder(parentId, name) {
   return found?.id || null;
 }
 
-
 async function getFirstFile(folderId) {
   const items = await workdriveList(folderId);
   return items.find(i => i.attributes?.type !== 'folder') || null;
 }
 
-
 async function downloadFile(fileId) {
   const token = await getZohoToken();
   const resp = await fetch(
-    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}`,
+    `https://www.zohoapis.com/workdrive/api/v1/download/${fileId}`,
     { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
   );
   if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
@@ -96,14 +76,12 @@ function uint8ToBase64(uint8) {
   return btoa(binary);
 }
 
-
 async function fetchPermitFiles(rootFolderId) {
   const files = {};
   const errors = [];
 
-  // ── SLD: Permitting → Electrical → first file ──
   try {
-    const permId  = await findSubfolder(rootFolderId, 'Permitting');
+    const permId = await findSubfolder(rootFolderId, 'Permitting');
     if (permId) {
       const elecId = await findSubfolder(permId, 'Electrical');
       if (elecId) {
@@ -113,10 +91,8 @@ async function fetchPermitFiles(rootFolderId) {
           files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
         }
       }
-
-      // ── Site plan: Permitting → first image/pdf file ──
       const permItems = await workdriveList(permId);
-      const siteFile  = permItems.find(i => {
+      const siteFile = permItems.find(i => {
         const name = (i.attributes?.name || '').toLowerCase();
         const type = i.attributes?.type;
         return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
@@ -130,9 +106,8 @@ async function fetchPermitFiles(rootFolderId) {
     errors.push('Permitting folder: ' + e.message);
   }
 
-  // ── Bill: Pics → Power Bill → first file ──
   try {
-    const picsId      = await findSubfolder(rootFolderId, 'Pics');
+    const picsId = await findSubfolder(rootFolderId, 'Pics');
     if (picsId) {
       const billFoldId = await findSubfolder(picsId, 'Power Bill');
       if (billFoldId) {
@@ -155,31 +130,30 @@ async function fetchPermitFiles(rootFolderId) {
   return files;
 }
 
-
-// ─── Claude AI Extraction ─────────────────────────────────────────────────────
-
 function getMediaType(filename) {
   const ext = (filename || '').split('.').pop().toLowerCase();
-  if (ext === 'pdf')                return 'application/pdf';
+  if (ext === 'pdf')               return 'application/pdf';
   if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
-  if (ext === 'png')                return 'image/png';
-  if (ext === 'webp')               return 'image/webp';
+  if (ext === 'png')               return 'image/png';
+  if (ext === 'webp')              return 'image/webp';
   return 'image/png';
 }
 
-for (const key of ['bill', 'sld', 'siteplan']) {
-  const file = files[key];
-  const mt   = getMediaType(file.filename);
-  if (mt === 'application/pdf') {
-    content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
-  } else {
-    // Force image/jpeg if mimeType is unknown or generic
-    const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream') 
-      ? file.mimeType 
-      : mt;
-    content.push({ type: 'image', source: { type: 'base64', media_type: imageMt, data: file.b64 } });
+async function extractWithClaude(files, apiKey) {
+  const content = [];
+
+  for (const key of ['bill', 'sld', 'siteplan']) {
+    const file = files[key];
+    const mt = getMediaType(file.filename);
+    if (mt === 'application/pdf') {
+      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
+    } else {
+      const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream')
+        ? file.mimeType
+        : mt;
+      content.push({ type: 'image', source: { type: 'base64', media_type: imageMt, data: file.b64 } });
+    }
   }
-}
 
   content.push({ type: 'text', text: `Extract fields from these solar permit documents. Return ONLY raw JSON.
 
@@ -224,15 +198,15 @@ Rules:
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
-      'Content-Type':      'application/json',
-      'x-api-key':         apiKey,
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model:      'claude-opus-4-5',
+      model: 'claude-opus-4-5',
       max_tokens: 800,
-      messages:   [{ role: 'user', content }]
+      messages: [{ role: 'user', content }]
     })
   });
 
@@ -242,19 +216,17 @@ Rules:
   }
 
   const json = await resp.json();
-  const raw  = json.content.map(b => b.text || '').join('').trim();
-  const m    = raw.match(/\{[\s\S]*\}/);
+  const raw = json.content.map(b => b.text || '').join('').trim();
+  const m = raw.match(/\{[\s\S]*\}/);
   return JSON.parse(m ? m[0] : raw);
-
-// ─── Merge CRM + AI data ──────────────────────────────────────────────────────
+}
 
 function mergeData(extracted, dealData, files) {
   const isoDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-  const month   = String(isoDate.getMonth() + 1).padStart(2, '0');
-  const day     = String(isoDate.getDate()).padStart(2, '0');
-  const year    = isoDate.getFullYear();
+  const month = String(isoDate.getMonth() + 1).padStart(2, '0');
+  const day = String(isoDate.getDate()).padStart(2, '0');
+  const year = isoDate.getFullYear();
 
-  // Store file blobs for form fill to use
   const fileData = {
     sld:      { b64: files.sld.b64,      filename: files.sld.filename,      mimeType: files.sld.mimeType },
     siteplan: { b64: files.siteplan.b64, filename: files.siteplan.filename, mimeType: files.siteplan.mimeType },
@@ -262,30 +234,21 @@ function mergeData(extracted, dealData, files) {
   };
 
   return {
-    // From AI
     ...extracted,
-
-    // From CRM (override AI where CRM is more reliable)
-    person1_first:           dealData.firstName  || extracted.person1_first  || '',
-    person1_last:            dealData.lastName   || extracted.person1_last   || '',
+    person1_first:           dealData.firstName    || extracted.person1_first  || '',
+    person1_last:            dealData.lastName     || extracted.person1_last   || '',
     person1_middle_initial:  '',
-    person1_email:           dealData.email      || '',
-    person1_phone:           dealData.phone      || '',
+    person1_email:           dealData.email        || '',
+    person1_phone:           dealData.phone        || '',
     person1_mailing_address: dealData.streetAddress || `${extracted.house_number} ${extracted.street_name}`,
-    person1_city:            dealData.city       || extracted.city || '',
+    person1_city:            dealData.city         || extracted.city || '',
     person1_postal:          extracted.postal_code || '',
-
-    // Co-applicant comes from the bill via AI extraction
-    has_second_person:      extracted.has_second_person || false,
-    person2_first:          extracted.person2_first          || '',
-    person2_middle_initial: extracted.person2_middle_initial || '',
-    person2_last:           extracted.person2_last           || '',
-
-    // Dates & comments
-    interconnection_date: `${month}/${day}/${year}`,
+    has_second_person:       extracted.has_second_person || false,
+    person2_first:           extracted.person2_first          || '',
+    person2_middle_initial:  extracted.person2_middle_initial || '',
+    person2_last:            extracted.person2_last           || '',
+    interconnection_date:    `${month}/${day}/${year}`,
     comment: `Installation of ${extracted.num_modules}x620W and ${extracted.num_ds3h_inverters}xDS3-H microinverters with Kinetic Racking`,
-
-    // Files (for attachment)
     files: fileData
   };
 }
