@@ -181,6 +181,7 @@ function getMediaType(filename) {
 }
 
 async function extractWithClaude(files, apiKey) {
+  console.log('Files being sent to Claude:', Object.keys(files).map(k => `${k}: ${files[k]?.filename} (${files[k]?.mimeType})`));
   const content = [];
 
   for (const key of ['bill', 'sld', 'siteplan']) {
