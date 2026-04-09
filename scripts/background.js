@@ -58,24 +58,31 @@ async function getFirstFile(folderId) {
   return file;
 }
 
-async function downloadFile(downloadUrl) {
+async function downloadFile(downloadUrl, permalink) {
+  // Try permalink first (uses browser session, no auth needed)
+  if (permalink) {
+    try {
+      const resp = await fetch(permalink, { credentials: 'include' });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const arrayBuf = await blob.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuf);
+        return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+      }
+    } catch(e) {}
+  }
+  
+  // Fallback to download_url with token
   const token = await getZohoToken();
-  // Add token as query parameter for download-accl domain
-  const url = downloadUrl.includes('?') 
-    ? `${downloadUrl}&authtoken=${token}`
-    : `${downloadUrl}?authtoken=${token}`;
-  const resp = await fetch(url, { 
-    headers: { 
-      'Authorization': `Zoho-oauthtoken ${token}`,
-      'X-ZCSRF-TOKEN': token
-    } 
+  const resp = await fetch(downloadUrl, { 
+    headers: { 'Authorization': `Zoho-oauthtoken ${token}` },
+    credentials: 'include'
   });
   if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
   const blob = await resp.blob();
   const arrayBuf = await blob.arrayBuffer();
   const uint8 = new Uint8Array(arrayBuf);
-  const b64 = uint8ToBase64(uint8);
-  return { b64, filename: '', mimeType: blob.type };
+  return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
 }
 
 function uint8ToBase64(uint8) {
@@ -95,7 +102,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (elecId) {
         const sldFile = await getFirstFile(elecId);
         if (sldFile) {
-          files.sld = await downloadFile(sldFile.attributes?.download_url);
+          files.sld = await downloadFile(sldFile.attributes?.download_url, sldFile.attributes?.permalink);
           files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
         }
       }
@@ -106,7 +113,7 @@ async function fetchPermitFiles(rootFolderId) {
         return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
       });
       if (siteFile) {
-        files.siteplan = await downloadFile(siteFile.attributes?.download_url);
+        files.siteplan = await downloadFile(siteFile.attributes?.download_url, siteFile.attributes?.permalink);
         files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
       }
     }
@@ -121,7 +128,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (billFoldId) {
         const billFile = await getFirstFile(billFoldId);
         if (billFile) {
-          files.bill = await downloadFile(billFile.attributes?.download_url);
+          files.bill = await downloadFile(billFile.attributes?.download_url, billFile.attributes?.permalink);
           files.bill.filename = billFile.attributes?.name || 'bill.pdf';
         }
       }
