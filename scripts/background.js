@@ -79,7 +79,7 @@ async function getFirstFile(folderId) {
 async function downloadFile(fileId) {
   const token = await getZohoToken();
   const resp = await fetch(
-    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
+    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}`,
     { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
   );
   if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
