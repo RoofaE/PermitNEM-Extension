@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      width: 340px;
+      min-height: 200px;
+      background: #fff;
+    }
+
+    .header {
+      background: #e85d04;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-mark {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px; color: white;
+      flex-shrink: 0;
+    }
+
+    .header-text { color: white; }
+    .header-title { font-size: 16px; font-weight: 600; }
+    .header-sub { font-size: 11px; opacity: 0.8; margin-top: 1px; }
+
+    .body { padding: 20px; }
+
+    /* NOT ON DEAL PAGE */
+    .not-deal {
+      text-align: center;
+      padding: 24px 16px;
+      color: #888;
+    }
+    .not-deal .icon { font-size: 32px; margin-bottom: 12px; }
+    .not-deal p { font-size: 13px; line-height: 1.5; }
+
+    /* CLIENT CARD */
+    .client-card {
+      background: #f8f8f8;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .client-label { font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+    .client-name  { font-size: 17px; font-weight: 600; color: #1a1a1a; }
+    .client-email { font-size: 12px; color: #666; margin-top: 3px; }
+    .client-phone { font-size: 12px; color: #666; margin-top: 1px; }
+
+    .workdrive-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #eee;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green  { background: #22c55e; }
+    .dot.red    { background: #ef4444; }
+    .dot.yellow { background: #f59e0b; }
+
+    /* BUTTON */
+    .btn-main {
+      width: 100%;
+      padding: 13px;
+      background: #e85d04;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: opacity 0.15s;
+    }
+    .btn-main:hover:not(:disabled) { opacity: 0.88; }
+    .btn-main:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .spinner {
+      width: 15px; height: 15px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* STATUS */
+    .status {
+      margin-top: 12px;
+      padding: 10px 13px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      display: none;
+    }
+    .status.info    { background: #fff8f0; border: 1px solid #fde8cc; color: #c05c00; }
+    .status.success { background: #f0faf4; border: 1px solid #bbf7d0; color: #15803d; }
+    .status.error   { background: #fff0f0; border: 1px solid #fecaca; color: #dc2626; }
+
+    /* STEPS */
+    .steps {
+      margin-top: 14px;
+      padding: 12px 14px;
+      background: #f8f8f8;
+      border-radius: 8px;
+      display: none;
+    }
+    .steps-title { font-size: 11px; font-weight: 600; color: #555; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .step { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 5px; font-size: 12px; color: #555; }
+    .step-num { width: 18px; height: 18px; border-radius: 50%; background: #e85d04; color: white; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+
+    /* SETTINGS */
+    .settings-link {
+      text-align: center;
+      margin-top: 14px;
+      font-size: 11px;
+      color: #aaa;
+      cursor: pointer;
+    }
+    .settings-link:hover { color: #e85d04; }
+
+    /* SETTINGS PANEL */
+    .settings-panel { display: none; margin-top: 16px; }
+    .settings-label { font-size: 11px; color: #888; margin-bottom: 5px; display: block; }
+    .settings-input {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: monospace;
+      outline: none;
+    }
+    .settings-input:focus { border-color: #e85d04; }
+    .settings-save {
+      width: 100%; margin-top: 8px;
+      padding: 9px;
+      background: #1a1a1a; color: white;
+      border: none; border-radius: 8px;
+      font-size: 12px; font-weight: 600;
+      cursor: pointer;
+    }
+    .settings-saved { color: #22c55e; font-size: 11px; text-align: center; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo-mark">PF</div>
+    <div class="header-text">
+      <div class="header-title">PermitFlow</div>
+      <div class="header-sub">Pioneer Solar & Renewables</div>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- Not on a deal page -->
+    <div class="not-deal" id="notDeal" style="display:none">
+      <div class="icon">📋</div>
+      <p>Open a <strong>client Deal</strong> in Zoho CRM to use PermitFlow.</p>
+    </div>
+
+    <!-- No WorkDrive link -->
+    <div class="not-deal" id="noDrive" style="display:none">
+      <div class="icon">📁</div>
+      <p>No WorkDrive folder found on this deal.<br>Add the WorkDrive Folder URL field to continue.</p>
+    </div>
+
+    <!-- Ready state -->
+    <div id="readyState" style="display:none">
+      <div class="client-card">
+        <div class="client-label">Client</div>
+        <div class="client-name" id="clientName">—</div>
+        <div class="client-email" id="clientEmail"></div>
+        <div class="client-phone" id="clientPhone"></div>
+        <div class="workdrive-status">
+          <div class="dot green"></div>
+          <span style="color:#555">WorkDrive folder linked</span>
+        </div>
+      </div>
+
+      <button class="btn-main" id="runBtn" onclick="runPermit()">
+        <span id="btnLabel">⚡ Fill SaskPower NEM Permit</span>
+        <div class="spinner" id="spinner"></div>
+      </button>
+
+      <div class="status" id="status"></div>
+
+      <div class="steps" id="steps">
+        <div class="steps-title">Almost done — you do these:</div>
+        <div class="step"><div class="step-num">1</div><span>Review all fields in the form</span></div>
+        <div class="step"><div class="step-num">2</div><span>Files are attached automatically</span></div>
+        <div class="step"><div class="step-num">3</div><span>Check "I agree" box</span></div>
+        <div class="step"><div class="step-num">4</div><span>Click Submit</span></div>
+      </div>
+    </div>
+
+    <!-- Settings toggle -->
+    <div class="settings-link" onclick="toggleSettings()">⚙ Settings</div>
+
+    <div class="settings-panel" id="settingsPanel">
+      <label class="settings-label">Anthropic API Key</label>
+      <input type="password" class="settings-input" id="apiKeyInput" placeholder="sk-ant-..." />
+      <button class="settings-save" onclick="saveSettings()">Save</button>
+      <div class="settings-saved" id="savedMsg">✓ Saved!</div>
+    </div>
+
+  </div>
+
+  <script src="scripts/popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+'use strict';
+
+// Background service worker
+// Handles: WorkDrive file fetching + Claude AI extraction
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'runPermit') {
+    handleRunPermit(msg.dealData, msg.apiKey)
+      .then(result => sendResponse(result))
+      .catch(err  => sendResponse({ error: err.message }));
+    return true;
+  }
+});
+
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
+async function handleRunPermit(dealData, apiKey) {
+  const workdriveUrl = dealData.workdriveUrl;
+  if (!workdriveUrl) throw new Error('No WorkDrive URL found on this deal.');
+
+  // 1. Get folder ID from URL
+  const folderId = extractFolderId(workdriveUrl);
+  if (!folderId) throw new Error('Could not extract folder ID from WorkDrive URL.');
+
+  // 2. Fetch files from WorkDrive
+  const files = await fetchPermitFiles(folderId);
+
+  // 3. Extract data with Claude AI
+  const extractedData = await extractWithClaude(files, apiKey);
+
+  // 4. Merge with CRM data
+  const finalData = mergeData(extractedData, dealData, files);
+
+  return { data: finalData };
+}
+
+
+// ─── WorkDrive ────────────────────────────────────────────────────────────────
+
+function extractFolderId(url) {
+  const m = url.match(/\/folder\/([a-zA-Z0-9]+)/);
+  return m ? m[1] : null;
+}
+
+
+async function workdriveList(folderId) {
+  const resp = await fetch(
+    `https://www.zohoapis.com/workdrive/api/v1/files/${folderId}/files`,
+    { credentials: 'include' }
+  );
+  if (!resp.ok) throw new Error(`WorkDrive API error: ${resp.status}`);
+  const json = await resp.json();
+  return json.data || [];
+}
+
+
+async function findSubfolder(parentId, name) {
+  const items = await workdriveList(parentId);
+  const found = items.find(i =>
+    i.attributes?.name?.toLowerCase() === name.toLowerCase() &&
+    i.attributes?.type === 'folder'
+  );
+  return found?.id || null;
+}
+
+
+async function getFirstFile(folderId) {
+  const items = await workdriveList(folderId);
+  return items.find(i => i.attributes?.type !== 'folder') || null;
+}
+
+
+async function downloadFile(fileId) {
+  const resp = await fetch(
+    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
+    { credentials: 'include' }
+  );
+  if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
+  const blob       = await resp.blob();
+  const arrayBuf   = await blob.arrayBuffer();
+  const uint8      = new Uint8Array(arrayBuf);
+  const b64        = uint8ToBase64(uint8);
+  const filename   = resp.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] || 'file';
+  return { b64, filename, mimeType: blob.type };
+}
+
+
+function uint8ToBase64(uint8) {
+  let binary = '';
+  for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+  return btoa(binary);
+}
+
+
+async function fetchPermitFiles(rootFolderId) {
+  const files = {};
+  const errors = [];
+
+  // ── SLD: Permitting → Electrical → first file ──
+  try {
+    const permId  = await findSubfolder(rootFolderId, 'Permitting');
+    if (permId) {
+      const elecId = await findSubfolder(permId, 'Electrical');
+      if (elecId) {
+        const sldFile = await getFirstFile(elecId);
+        if (sldFile) {
+          files.sld = await downloadFile(sldFile.id);
+          files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
+        }
+      }
+
+      // ── Site plan: Permitting → first image/pdf file ──
+      const permItems = await workdriveList(permId);
+      const siteFile  = permItems.find(i => {
+        const name = (i.attributes?.name || '').toLowerCase();
+        const type = i.attributes?.type;
+        return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
+      });
+      if (siteFile) {
+        files.siteplan = await downloadFile(siteFile.id);
+        files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
+      }
+    }
+  } catch (e) {
+    errors.push('Permitting folder: ' + e.message);
+  }
+
+  // ── Bill: Pics → Power Bill → first file ──
+  try {
+    const picsId      = await findSubfolder(rootFolderId, 'Pics');
+    if (picsId) {
+      const billFoldId = await findSubfolder(picsId, 'Power Bill');
+      if (billFoldId) {
+        const billFile = await getFirstFile(billFoldId);
+        if (billFile) {
+          files.bill = await downloadFile(billFile.id);
+          files.bill.filename = billFile.attributes?.name || 'bill.pdf';
+        }
+      }
+    }
+  } catch (e) {
+    errors.push('Power Bill folder: ' + e.message);
+  }
+
+  const missing = ['sld', 'siteplan', 'bill'].filter(k => !files[k]);
+  if (missing.length > 0) {
+    throw new Error(`Could not find: ${missing.join(', ')}. Check WorkDrive folder structure.\n${errors.join('\n')}`);
+  }
+
+  return files;
+}
+
+
+// ─── Claude AI Extraction ─────────────────────────────────────────────────────
+
+function getMediaType(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (ext === 'pdf')              return 'application/pdf';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  return 'image/png';
+}
+
+
+async function extractWithClaude(files, apiKey) {
+  const content = [];
+
+  for (const key of ['bill', 'sld', 'siteplan']) {
+    const file = files[key];
+    const mt   = getMediaType(file.filename);
+    if (mt === 'application/pdf') {
+      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
+    } else {
+      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: file.b64 } });
+    }
+  }
+
+  content.push({ type: 'text', text: `Extract fields from these solar permit documents. Return ONLY raw JSON.
+
+{
+  "num_modules": "6",
+  "num_ds3h_inverters": "3",
+  "total_inverter_kw": "3.150",
+  "account_number": "50000240738",
+  "house_number": "123",
+  "street_name": "Example St",
+  "city": "Saskatoon",
+  "postal_code": "S7K 0A1",
+  "location_type": "city",
+  "qtr_lsd": "",
+  "section": "",
+  "township": "",
+  "range": "",
+  "meridian": "",
+  "first_nation_name": "",
+  "reserve_name": ""
+}
+
+Rules:
+- Count DS3-H inverters from SLD
+- total_inverter_kw = count * 1.050 to 3 decimal places
+- Account number: strip all spaces
+- location_type: city / rural / firstnation
+- Mailing address is at BOTTOM of bill` });
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type':      'application/json',
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model:      'claude-opus-4-5',
+      max_tokens: 800,
+      messages:   [{ role: 'user', content }]
+    })
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Claude API error: ${resp.status}`);
+  }
+
+  const json = await resp.json();
+  const raw  = json.content.map(b => b.text || '').join('').trim();
+  const m    = raw.match(/\{[\s\S]*\}/);
+  return JSON.parse(m ? m[0] : raw);
+}
+
+
+// ─── Merge CRM + AI data ──────────────────────────────────────────────────────
+
+function mergeData(extracted, dealData, files) {
+  const isoDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  const month   = String(isoDate.getMonth() + 1).padStart(2, '0');
+  const day     = String(isoDate.getDate()).padStart(2, '0');
+  const year    = isoDate.getFullYear();
+
+  // Store file blobs for form fill to use
+  const fileData = {
+    sld:      { b64: files.sld.b64,      filename: files.sld.filename,      mimeType: files.sld.mimeType },
+    siteplan: { b64: files.siteplan.b64, filename: files.siteplan.filename, mimeType: files.siteplan.mimeType },
+    bill:     { b64: files.bill.b64,     filename: files.bill.filename,     mimeType: files.bill.mimeType }
+  };
+
+  return {
+    // From AI
+    ...extracted,
+
+    // From CRM (override AI where CRM is more reliable)
+    person1_first:           dealData.firstName  || extracted.person1_first  || '',
+    person1_last:            dealData.lastName   || extracted.person1_last   || '',
+    person1_middle_initial:  '',
+    person1_email:           dealData.email      || '',
+    person1_phone:           dealData.phone      || '',
+    person1_mailing_address: dealData.streetAddress || `${extracted.house_number} ${extracted.street_name}`,
+    person1_city:            dealData.city       || extracted.city || '',
+    person1_postal:          extracted.postal_code || '',
+
+    // Always false for now — co-applicant done manually
+    has_second_person: false,
+
+    // Dates & comments
+    interconnection_date: `${month}/${day}/${year}`,
+    comment: `Installation of ${extracted.num_modules}x620W and ${extracted.num_ds3h_inverters}xDS3-H microinverters with Kinetic Racking`,
+
+    // Files (for attachment)
+    files: fileData
+  };
+}

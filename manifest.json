@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "PermitFlow — Pioneer Solar",
+  "version": "1.0.0",
+  "description": "Auto-fill SaskPower NEM applications from Zoho CRM deals",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "https://crm.zoho.com/*",
+    "https://workdrive.zoho.com/*",
+    "https://www.zohoapis.com/*",
+    "https://api.anthropic.com/*",
+    "https://www.saskpower.com/*"
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "background": {
+    "service_worker": "scripts/background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://crm.zoho.com/*"],
+      "js": ["scripts/crm.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.saskpower.com/forms/net-metering-application-form*"],
+      "js": ["scripts/formfill.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
