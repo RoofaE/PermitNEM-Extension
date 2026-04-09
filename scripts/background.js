@@ -59,6 +59,20 @@ async function getFirstFile(folderId) {
 }
 
 async function downloadFile(downloadUrl, permalink) {
+  // Try permalink first (uses browser session, no auth needed)
+  if (permalink) {
+    try {
+      const resp = await fetch(permalink, { credentials: 'include' });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const arrayBuf = await blob.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuf);
+        return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+      }
+    } catch(e) {}
+  }
+  
+  // Fallback to download_url with token
   const token = await getZohoToken();
   const resp = await fetch(downloadUrl, { 
     headers: { 'Authorization': `Zoho-oauthtoken ${token}` },
