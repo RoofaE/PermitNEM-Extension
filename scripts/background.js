@@ -271,6 +271,8 @@ function capitalize(str) {
 }
 
 function mergeData(extracted, dealData, files) {
+  console.log('EXTRACTED person1:', extracted.person1_first, extracted.person1_last);
+  console.log('DEALDATA:', dealData.firstName, dealData.lastName);
   const isoDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const month = String(isoDate.getMonth() + 1).padStart(2, '0');
   const day = String(isoDate.getDate()).padStart(2, '0');
