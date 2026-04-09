@@ -166,7 +166,7 @@ async function extractWithClaude(files, apiKey) {
       const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream')
         ? file.mimeType
         : mt;
-      content.push({ type: 'image', source: { type: 'base64', media_type: imageMt, data: file.b64 } });
+      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: file.b64 } });
     }
   }
 
