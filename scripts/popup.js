@@ -111,7 +111,7 @@ async function connectZoho() {
   }
 
   const redirectUri = chrome.identity.getRedirectURL();
-  const scope = 'ZohoWorkDrive.files.READ,ZohoWorkDrive.files.ALL';
+  const scope = 'WorkDrive.files.READ WorkDrive.files.ALL';
   const authUrl = `https://accounts.zoho.com/oauth/v2/auth?response_type=token&client_id=${zohoClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
 
   chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (redirectUrl) => {
