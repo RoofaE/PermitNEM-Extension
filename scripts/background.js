@@ -244,6 +244,11 @@ Rules:
   return JSON.parse(m ? m[0] : raw);
 }
 
+function capitalize(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
 function mergeData(extracted, dealData, files) {
   const isoDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const month = String(isoDate.getMonth() + 1).padStart(2, '0');
@@ -258,11 +263,11 @@ function mergeData(extracted, dealData, files) {
 
   return {
     ...extracted,
-    person1_first:           dealData.firstName    || extracted.person1_first  || '',
-    person1_last:            dealData.lastName     || extracted.person1_last   || '',
-    person1_middle_initial:  '',
-    person1_email:           dealData.email        || '',
-    person1_phone:           dealData.phone        || '',
+    person1_first:           capitalize(dealData.firstName  || extracted.person1_first  || ''),
+    person1_last:            capitalize(dealData.lastName   || extracted.person1_last   || ''),
+    person1_middle_initial:  (extracted.person1_middle_initial || '').toUpperCase(),
+    person1_email:           dealData.email  || '',
+    person1_phone:           dealData.phone  || '',
     person1_mailing_address: dealData.streetAddress || `${extracted.house_number} ${extracted.street_name}`,
     person1_city:            dealData.city         || extracted.city || '',
     person1_postal:          extracted.postal_code || '',
