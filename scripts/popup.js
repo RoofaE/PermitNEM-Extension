@@ -139,6 +139,6 @@ function showStatus(type, msg) {
   el.style.display = 'block';
 }
 
-window.runPermit     = runPermit;
-window.toggleSettings = toggleSettings;
-window.saveSettings  = saveSettings;
+document.getElementById('runBtn').addEventListener('click', runPermit);
+document.querySelector('.settings-link').addEventListener('click', toggleSettings);
+document.querySelector('.settings-save').addEventListener('click', saveSettings);
