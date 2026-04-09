@@ -59,16 +59,27 @@ async function getFirstFile(folderId) {
 }
 
 async function downloadFile(downloadUrl, permalink) {
-  // Try permalink with download flag
+  // Try download_url with browser session only (no token header)
+  try {
+    const resp = await fetch(downloadUrl, { credentials: 'include' });
+    if (resp.ok) {
+      const ct = resp.headers.get('content-type') || '';
+      if (!ct.includes('text/html')) {
+        const blob = await resp.blob();
+        const arrayBuf = await blob.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuf);
+        return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+      }
+    }
+  } catch(e) {}
+
+  // Try permalink with browser session
   if (permalink) {
     try {
-      const dlUrl = permalink.includes('?') 
-        ? `${permalink}&download=true` 
-        : `${permalink}?download=true`;
+      const dlUrl = `${permalink}?download=true`;
       const resp = await fetch(dlUrl, { credentials: 'include' });
       if (resp.ok) {
         const ct = resp.headers.get('content-type') || '';
-        // Make sure we got a file, not an HTML page
         if (!ct.includes('text/html')) {
           const blob = await resp.blob();
           const arrayBuf = await blob.arrayBuffer();
@@ -78,18 +89,8 @@ async function downloadFile(downloadUrl, permalink) {
       }
     } catch(e) {}
   }
-  
-  // Fallback to download_url with token
-  const token = await getZohoToken();
-  const resp = await fetch(downloadUrl, { 
-    headers: { 'Authorization': `Zoho-oauthtoken ${token}` },
-    credentials: 'include'
-  });
-  if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
-  const blob = await resp.blob();
-  const arrayBuf = await blob.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuf);
-  return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+
+  throw new Error('Could not download file — all methods failed');
 }
 
 function uint8ToBase64(uint8) {
