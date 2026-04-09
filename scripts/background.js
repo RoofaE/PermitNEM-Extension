@@ -58,12 +58,10 @@ async function getFirstFile(folderId) {
   return file;
 }
 
-async function downloadFile(fileId) {
+async function downloadFile(fileId, downloadUrl) {
   const token = await getZohoToken();
-  const resp = await fetch(
-    `https://www.zohoapis.com/workdrive/api/v1/download/${fileId}`,
-    { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
-  );
+  const url = downloadUrl || `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`;
+  const resp = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
   if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
   const blob = await resp.blob();
   const arrayBuf = await blob.arrayBuffer();
@@ -89,7 +87,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (elecId) {
         const sldFile = await getFirstFile(elecId);
         if (sldFile) {
-          files.sld = await downloadFile(sldFile.id);
+          files.sld = await downloadFile(sldFile.id, sldFile.attributes?.download_url);
           files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
         }
       }
@@ -100,7 +98,7 @@ async function fetchPermitFiles(rootFolderId) {
         return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
       });
       if (siteFile) {
-        files.siteplan = await downloadFile(siteFile.id);
+        files.siteplan = await downloadFile(siteFile.id, siteFile.attributes?.download_url);
         files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
       }
     }
@@ -115,7 +113,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (billFoldId) {
         const billFile = await getFirstFile(billFoldId);
         if (billFile) {
-          files.bill = await downloadFile(billFile.id);
+          files.bill = await downloadFile(billFile.id, billFile.attributes?.download_url);
           files.bill.filename = billFile.attributes?.name || 'bill.pdf';
         }
       }
