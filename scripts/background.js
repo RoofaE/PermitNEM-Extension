@@ -43,17 +43,22 @@ function extractFolderId(url) {
   return m ? m[1] : null;
 }
 
+async function getZohoToken() {
+  const { zohoToken } = await chrome.storage.local.get('zohoToken');
+  return zohoToken || null;
+}
 
 async function workdriveList(folderId) {
+  const token = await getZohoToken();
+  if (!token) throw new Error('Not authenticated with Zoho. Click "Connect Zoho" in settings.');
   const resp = await fetch(
     `https://www.zohoapis.com/workdrive/api/v1/files/${folderId}/files`,
-    { credentials: 'include' }
+    { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
   );
   if (!resp.ok) throw new Error(`WorkDrive API error: ${resp.status}`);
   const json = await resp.json();
   return json.data || [];
 }
-
 
 async function findSubfolder(parentId, name) {
   const items = await workdriveList(parentId);
@@ -72,17 +77,11 @@ async function getFirstFile(folderId) {
 
 
 async function downloadFile(fileId) {
+  const token = await getZohoToken();
   const resp = await fetch(
     `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
-    { credentials: 'include' }
+    { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
   );
-  if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
-  const blob       = await resp.blob();
-  const arrayBuf   = await blob.arrayBuffer();
-  const uint8      = new Uint8Array(arrayBuf);
-  const b64        = uint8ToBase64(uint8);
-  const filename   = resp.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] || 'file';
-  return { b64, filename, mimeType: blob.type };
 }
 
 

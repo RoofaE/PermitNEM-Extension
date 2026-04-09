@@ -2,18 +2,20 @@
 
 let dealData = null;
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
-
 document.addEventListener('DOMContentLoaded', async () => {
-  // Load saved API key into settings
+  // Wire up all buttons first — always, regardless of page
+  document.getElementById('runBtn').addEventListener('click', runPermit);
+  document.querySelector('.settings-link').addEventListener('click', toggleSettings);
+  document.querySelector('.settings-save').addEventListener('click', saveSettings);
+  document.getElementById('connectZohoBtn').addEventListener('click', connectZoho);
+
+  // Load saved API key
   const { apiKey } = await chrome.storage.local.get('apiKey');
   if (apiKey) document.getElementById('apiKeyInput').value = apiKey;
 
   // Get current tab
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url   = tab?.url || '';
-
-  // Check if on Zoho CRM Deals page
+  const url = tab?.url || '';
   const isDealsPage = url.includes('crm.zoho.com') && url.includes('/tab/Potentials/');
 
   if (!isDealsPage) {
@@ -21,7 +23,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // Ask content script for deal data
   try {
     const response = await chrome.tabs.sendMessage(tab.id, { action: 'getDealData' });
 
@@ -37,10 +38,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    // Show ready state
-    document.getElementById('clientName').textContent  = dealData.clientName  || '—';
-    document.getElementById('clientEmail').textContent = dealData.email        || '';
-    document.getElementById('clientPhone').textContent = dealData.phone        || '';
+    document.getElementById('clientName').textContent  = dealData.clientName || '—';
+    document.getElementById('clientEmail').textContent = dealData.email || '';
+    document.getElementById('clientPhone').textContent = dealData.phone || '';
     show('readyState');
 
   } catch (err) {
@@ -48,16 +48,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-
-// ─── Run Permit ───────────────────────────────────────────────────────────────
-
 async function runPermit() {
   const { apiKey } = await chrome.storage.local.get('apiKey');
   if (!apiKey) {
     showStatus('error', 'No API key set. Click ⚙ Settings and add your Anthropic API key.');
     return;
   }
-
   if (!dealData?.workdriveUrl) {
     showStatus('error', 'No WorkDrive URL found on this deal.');
     return;
@@ -67,7 +63,6 @@ async function runPermit() {
   showStatus('info', 'Reading WorkDrive files...');
 
   try {
-    // Send to background script to do the heavy lifting
     const response = await chrome.runtime.sendMessage({
       action:   'runPermit',
       dealData: dealData,
@@ -80,15 +75,9 @@ async function runPermit() {
       return;
     }
 
-    // Open SaskPower form in new tab with extracted data
     showStatus('info', 'Opening SaskPower form...');
-
     await chrome.storage.local.set({ permitData: response.data });
-
-    chrome.tabs.create({
-      url: 'https://www.saskpower.com/forms/net-metering-application-form'
-    });
-
+    chrome.tabs.create({ url: 'https://www.saskpower.com/forms/net-metering-application-form' });
     showStatus('success', '✅ Form is opening! Switch to the new tab to review.');
     document.getElementById('steps').style.display = 'block';
 
@@ -99,23 +88,43 @@ async function runPermit() {
   setLoading(false);
 }
 
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
 function toggleSettings() {
   const panel = document.getElementById('settingsPanel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }
 
 async function saveSettings() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  await chrome.storage.local.set({ apiKey: key });
+  const key      = document.getElementById('apiKeyInput').value.trim();
+  const clientId = document.getElementById('clientIdInput').value.trim();
+  await chrome.storage.local.set({ apiKey: key, zohoClientId: clientId });
   document.getElementById('savedMsg').style.display = 'block';
   setTimeout(() => { document.getElementById('savedMsg').style.display = 'none'; }, 2000);
 }
 
+async function connectZoho() {
+  const { zohoClientId } = await chrome.storage.local.get('zohoClientId');
+  if (!zohoClientId) {
+    document.getElementById('connectStatus').textContent = 'Enter your Zoho Client ID below first.';
+    return;
+  }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+  const redirectUri = chrome.identity.getRedirectURL();
+  const scope = 'ZohoWorkDrive.files.READ,ZohoWorkDrive.files.ALL';
+  const authUrl = `https://accounts.zoho.com/oauth/v2/auth?response_type=token&client_id=${zohoClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+
+  chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (redirectUrl) => {
+    if (chrome.runtime.lastError || !redirectUrl) {
+      document.getElementById('connectStatus').textContent = 'Connection failed.';
+      return;
+    }
+    const match = redirectUrl.match(/access_token=([^&]+)/);
+    if (match) {
+      await chrome.storage.local.set({ zohoToken: match[1] });
+      document.getElementById('connectStatus').textContent = '✓ Connected!';
+      document.getElementById('connectStatus').style.color = '#22c55e';
+    }
+  });
+}
 
 function show(id) {
   ['notDeal', 'noDrive', 'readyState'].forEach(s => {
@@ -138,33 +147,3 @@ function showStatus(type, msg) {
   el.textContent   = msg;
   el.style.display = 'block';
 }
-
-document.getElementById('runBtn').addEventListener('click', runPermit);
-document.querySelector('.settings-link').addEventListener('click', toggleSettings);
-document.querySelector('.settings-save').addEventListener('click', saveSettings);
-
-async function connectZoho() {
-  const clientId = '1000.52QV545IS2T3FDZU1Y85MHH6TJR5LU';
-  const redirectUri = chrome.identity.getRedirectURL();
-  const scope = 'ZohoWorkDrive.files.READ,ZohoWorkDrive.files.ALL';
-  
-  const authUrl = `https://accounts.zoho.com/oauth/v2/auth?response_type=token&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
-
-  chrome.identity.launchWebAuthFlow(
-    { url: authUrl, interactive: true },
-    async (redirectUrl) => {
-      if (chrome.runtime.lastError || !redirectUrl) {
-        document.getElementById('connectStatus').textContent = 'Connection failed.';
-        return;
-      }
-      const match = redirectUrl.match(/access_token=([^&]+)/);
-      if (match) {
-        await chrome.storage.local.set({ zohoToken: match[1] });
-        document.getElementById('connectStatus').textContent = '✓ Connected!';
-        document.getElementById('connectStatus').style.color = '#22c55e';
-      }
-    }
-  );
-}
-
-document.getElementById('connectZohoBtn').addEventListener('click', connectZoho);

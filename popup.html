@@ -213,7 +213,11 @@
     <div class="settings-panel" id="settingsPanel">
       <label class="settings-label">Anthropic API Key</label>
       <input type="password" class="settings-input" id="apiKeyInput" placeholder="sk-ant-..." />
+      <label class="settings-label" style="margin-top:10px">Zoho Client ID</label>
+      <input type="text" class="settings-input" id="clientIdInput" placeholder="1000.XXXX..." />
       <button class="settings-save">Save</button>
+      <button class="settings-connect" id="connectZohoBtn" style="width:100%;margin-top:8px;padding:9px;background:#e85d04;color:white;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Connect Zoho</button>
+      <div id="connectStatus" style="font-size:11px;text-align:center;margin-top:6px;color:#888;"></div>
       <div class="settings-saved" id="savedMsg">✓ Saved!</div>
     </div>
 
