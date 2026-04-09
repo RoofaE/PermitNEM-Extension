@@ -285,7 +285,57 @@ async function fillForm(data) {
   await w(300);
 
   // ── 6. Co-applicant ──
-  console.log('PermitFlow: [6/8] Co-applicant — add manually if needed');
+  console.log('PermitFlow: [6/8] Co-applicant');
+  if (data.has_second_person && data.person2_first) {
+    console.log(`PermitFlow: Adding co-applicant: ${data.person2_first} ${data.person2_last}`);
+    try {
+      const addBtn = document.querySelector('text=Add a co-applicant') ||
+        Array.from(document.querySelectorAll('a, button, span')).find(el => el.textContent.trim() === 'Add a co-applicant');
+      if (addBtn) {
+        addBtn.click();
+        await w(1200);
+      }
+    } catch(e) {}
+
+    const p2First  = (data.person2_first  || '').charAt(0).toUpperCase() + (data.person2_first  || '').slice(1).toLowerCase();
+    const p2Last   = (data.person2_last   || '').charAt(0).toUpperCase() + (data.person2_last   || '').slice(1).toLowerCase();
+    const p2Middle = (data.person2_middle_initial || '').toUpperCase();
+
+    // Co-applicant type → Private Owner
+    const coRadio = document.querySelector(`[data-sc-field-name="Co-Applicant Type Input"][value="Private Owner"]`);
+    if (coRadio) { coRadio.checked = true; coRadio.click(); }
+    await w(400);
+
+    await f('Co-Applicant First Name Input',  p2First);
+    await f('Co-Applicant Middle Name Input', p2Middle);
+    await f('Co-Applicant Last Name Input',   p2Last);
+
+    // Copy address from person 1
+    await f('Co-Applicant Mailing Address Input', data.person1_mailing_address);
+    await f('Co-Applicant City Input',            data.person1_city);
+    await f('Co-Applicant Postal Code Input',     data.person1_postal || data.postal_code);
+
+    // Copy phone from person 1
+    if (data.person1_phone) {
+      await f('Co-Applicant Home Phone Input', data.person1_phone);
+      await f('Co-Applicant Cell Phone Input',  data.person1_phone);
+    }
+
+    // Copy email from person 1
+    if (data.person1_email) {
+      await fillEmailBoth('Co-Applicant Email Input', data.person1_email);
+    }
+
+    // Privacy fields
+    await f('Co-Applicant Emergency Contact Name Input', 'N/A');
+    await f('Co-Applicant Place of Employment Input',    'N/A');
+    await f('Co-Applicant Mothers Maiden Name Input',    'N/A');
+    await f('Co-Applicant Drivers License Input',        'N/A');
+
+    console.log('PermitFlow: Co-applicant filled');
+  } else {
+    console.log('PermitFlow: No co-applicant on this bill');
+  }
 
   // ── 7. Requestor + Supplier ──
   console.log('PermitFlow: [7/8] Requestor & Supplier');

@@ -186,6 +186,15 @@ async function extractWithClaude(files, apiKey) {
   "street_name": "Example St",
   "city": "Saskatoon",
   "postal_code": "S7K 0A1",
+  "person1_first": "JOHN",
+  "person1_middle_initial": "A",
+  "person1_last": "SMITH",
+  "person1_mailing_address": "123 Example St",
+  "person1_city": "Saskatoon",
+  "has_second_person": true,
+  "person2_first": "JANE",
+  "person2_middle_initial": "B",
+  "person2_last": "SMITH",
   "location_type": "city",
   "qtr_lsd": "",
   "section": "",
@@ -197,11 +206,14 @@ async function extractWithClaude(files, apiKey) {
 }
 
 Rules:
+- Bill names are LAST, FIRST - reverse them (SMITH, JOHN A means first=JOHN last=SMITH)
+- Two people are often listed on the bill - extract both
+- Mailing address is at BOTTOM of bill
 - Count DS3-H inverters from SLD
 - total_inverter_kw = count * 1.050 to 3 decimal places
 - Account number: strip all spaces
 - location_type: city / rural / firstnation
-- Mailing address is at BOTTOM of bill` });
+- has_second_person: true if second person found on bill, else false` });
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -258,8 +270,11 @@ function mergeData(extracted, dealData, files) {
     person1_city:            dealData.city       || extracted.city || '',
     person1_postal:          extracted.postal_code || '',
 
-    // Always false for now — co-applicant done manually
-    has_second_person: false,
+    // Co-applicant comes from the bill via AI extraction
+    has_second_person:      extracted.has_second_person || false,
+    person2_first:          extracted.person2_first          || '',
+    person2_middle_initial: extracted.person2_middle_initial || '',
+    person2_last:           extracted.person2_last           || '',
 
     // Dates & comments
     interconnection_date: `${month}/${day}/${year}`,
