@@ -58,31 +58,17 @@ async function getFirstFile(folderId) {
   return file;
 }
 
-async function downloadFile(fileId) {
+async function downloadFile(downloadUrl) {
   const token = await getZohoToken();
-  const endpoints = [
-    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
-    `https://www.zohoapis.com/workdrive/api/v1/download/${fileId}`,
-    `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/exportStream`,
-  ];
-  
-  let lastError;
-  for (const url of endpoints) {
-    try {
-      const resp = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-      if (resp.ok) {
-        const blob = await resp.blob();
-        const arrayBuf = await blob.arrayBuffer();
-        const uint8 = new Uint8Array(arrayBuf);
-        const b64 = uint8ToBase64(uint8);
-        return { b64, filename: '', mimeType: blob.type };
-      }
-      lastError = `${url} → ${resp.status}`;
-    } catch(e) {
-      lastError = `${url} → ${e.message}`;
-    }
-  }
-  throw new Error(`All download attempts failed: ${lastError}`);
+  const resp = await fetch(downloadUrl, { 
+    headers: { 'Authorization': `Zoho-oauthtoken ${token}` } 
+  });
+  if (!resp.ok) throw new Error(`Failed to download file: ${resp.status}`);
+  const blob = await resp.blob();
+  const arrayBuf = await blob.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuf);
+  const b64 = uint8ToBase64(uint8);
+  return { b64, filename: '', mimeType: blob.type };
 }
 
 function uint8ToBase64(uint8) {
@@ -102,7 +88,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (elecId) {
         const sldFile = await getFirstFile(elecId);
         if (sldFile) {
-          files.sld = await downloadFile(sldFile.id);
+          files.sld = await downloadFile(sldFile.attributes?.download_url);
           files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
         }
       }
@@ -113,7 +99,7 @@ async function fetchPermitFiles(rootFolderId) {
         return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.pdf'));
       });
       if (siteFile) {
-        files.siteplan = await downloadFile(siteFile.id);
+        files.siteplan = await downloadFile(siteFile.attributes?.download_url);
         files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
       }
     }
@@ -128,7 +114,7 @@ async function fetchPermitFiles(rootFolderId) {
       if (billFoldId) {
         const billFile = await getFirstFile(billFoldId);
         if (billFile) {
-          files.bill = await downloadFile(billFile.id);
+          files.bill = await downloadFile(billFile.attributes?.download_url);
           files.bill.filename = billFile.attributes?.name || 'bill.pdf';
         }
       }
