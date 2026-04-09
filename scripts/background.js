@@ -18,7 +18,10 @@ async function handleRunPermit(dealData, apiKey) {
   const bill = await fetchBillForAI(folderId);
   const extractedData = await extractWithClaude({ ...files, bill }, apiKey);
   const finalData = mergeData(extractedData, dealData, files);
-  return { data: finalData };
+
+  // Store directly in chrome.storage instead of passing through message (files too large)
+  await chrome.storage.local.set({ permitData: finalData });
+  return { success: true };
 }
 
 async function fetchBillForAI(rootFolderId) {
