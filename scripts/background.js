@@ -281,8 +281,8 @@ function mergeData(extracted, dealData, files) {
 
   return {
     ...extracted,
-    person1_first:           capitalize(dealData.firstName  || extracted.person1_first  || ''),
-    person1_last:            capitalize(dealData.lastName   || extracted.person1_last   || ''),
+    person1_first:           capitalize(extracted.person1_first  || ''),
+    person1_last:            capitalize(extracted.person1_last   || ''),
     person1_middle_initial:  (extracted.person1_middle_initial || '').toUpperCase(),
     person1_email:           dealData.email  || '',
     person1_phone:           dealData.phone  || '',
