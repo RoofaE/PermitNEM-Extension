@@ -9,38 +9,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// ─── Main handler ─────────────────────────────────────────────────────────────
-
 async function handleRunPermit(dealData, apiKey) {
   const workdriveUrl = dealData.workdriveUrl;
   if (!workdriveUrl) throw new Error('No WorkDrive URL found on this deal.');
   const folderId = extractFolderId(workdriveUrl);
   if (!folderId) throw new Error('Could not extract folder ID from WorkDrive URL.');
 
-  // Crawl entire WorkDrive folder recursively
   console.log('PermitFlow: Crawling WorkDrive folder...');
   const allFiles = await crawlWorkDrive(folderId);
   console.log(`PermitFlow: Found ${allFiles.length} files total`);
 
-  // Identify and download the 3 files to attach + bill for AI
   const { attachFiles, billFile } = await selectAndDownloadFiles(allFiles);
-
-  // Extract all permit data with Claude
   const extractedData = await extractWithClaude(attachFiles, billFile, apiKey);
-
-  // Merge with CRM data
   const finalData = mergeData(extractedData, dealData, attachFiles);
 
-  // Store in chrome.storage split to avoid quota
   const { files: fileData, ...dataWithoutFiles } = finalData;
   await chrome.storage.local.set({ permitData: dataWithoutFiles });
   await chrome.storage.local.set({ permitFiles: fileData });
 
   return { success: true };
 }
-
-
-// ─── WorkDrive crawler ────────────────────────────────────────────────────────
 
 function extractFolderId(url) {
   const m = url.match(/\/folder\/([a-zA-Z0-9]+)/);
@@ -65,7 +53,7 @@ async function workdriveList(folderId) {
 }
 
 async function crawlWorkDrive(folderId, depth = 0) {
-  if (depth > 5) return []; // max depth safety
+  if (depth > 5) return [];
   const items = await workdriveList(folderId);
   const files = [];
 
@@ -75,20 +63,18 @@ async function crawlWorkDrive(folderId, depth = 0) {
     const name = (attrs.name || '').toLowerCase();
 
     if (isFolder) {
-      // Recurse into subfolders
       const subFiles = await crawlWorkDrive(item.id, depth + 1);
       files.push(...subFiles);
     } else {
-      // Only collect relevant file types
       const ext = name.split('.').pop();
       if (['pdf', 'png', 'jpg', 'jpeg'].includes(ext)) {
         files.push({
-          id:           item.id,
-          name:         attrs.name || '',
-          ext:          ext,
-          downloadUrl:  attrs.download_url || '',
-          permalink:    attrs.permalink    || '',
-          size:         attrs.storage_info?.size_in_bytes || 0,
+          id:          item.id,
+          name:        attrs.name || '',
+          ext:         ext,
+          downloadUrl: attrs.download_url || '',
+          permalink:   attrs.permalink    || '',
+          mimeType:    ext === 'pdf' ? 'application/pdf' : (ext === 'png' ? 'image/png' : 'image/jpeg'),
         });
         console.log(`PermitFlow: Found file — ${attrs.name}`);
       }
@@ -98,53 +84,42 @@ async function crawlWorkDrive(folderId, depth = 0) {
   return files;
 }
 
-
-// ─── File selection ───────────────────────────────────────────────────────────
-
 async function selectAndDownloadFiles(allFiles) {
-  // Score each file to identify what it likely is
-  const scored = allFiles.map(f => ({
-    ...f,
-    score: scoreFile(f.name),
-  }));
+  const scored = allFiles.map(f => ({ ...f, score: scoreFile(f.name) }));
 
-  // Find the best SLD, site plan, spec sheet, and bill
-  const sldFile      = findBestMatch(scored, 'sld');
-  const siteFile     = findBestMatch(scored, 'siteplan');
-  const specFile     = findBestMatch(scored, 'spec');
-  const billFile     = findBestMatch(scored, 'bill');
+  const sldFile  = findBestMatch(scored, 'sld');
+  const siteFile = findBestMatch(scored, 'siteplan');
+  const specFile = findBestMatch(scored, 'spec');
+  const billFile = findBestMatch(scored, 'bill');
 
-  console.log('PermitFlow: SLD →',      sldFile?.name);
-  console.log('PermitFlow: Site plan →', siteFile?.name);
+  console.log('PermitFlow: SLD →',       sldFile?.name);
+  console.log('PermitFlow: Site plan →',  siteFile?.name);
   console.log('PermitFlow: Spec sheet →', specFile?.name);
-  console.log('PermitFlow: Bill →',      billFile?.name);
+  console.log('PermitFlow: Bill →',       billFile?.name);
 
-  // Download the 3 files to attach (SLD, site plan, spec sheet)
   const attachFiles = {};
 
   if (sldFile) {
-    attachFiles.sld = await downloadFile(sldFile.downloadUrl, sldFile.permalink);
+    attachFiles.sld = await downloadFile(sldFile.downloadUrl, sldFile.permalink, sldFile.id);
     attachFiles.sld.filename = sldFile.name;
   }
   if (siteFile) {
-    attachFiles.siteplan = await downloadFile(siteFile.downloadUrl, siteFile.permalink);
+    attachFiles.siteplan = await downloadFile(siteFile.downloadUrl, siteFile.permalink, siteFile.id);
     attachFiles.siteplan.filename = siteFile.name;
   }
   if (specFile) {
-    attachFiles.bill = await downloadFile(specFile.downloadUrl, specFile.permalink);
+    attachFiles.bill = await downloadFile(specFile.downloadUrl, specFile.permalink, specFile.id);
     attachFiles.bill.filename = specFile.name;
   }
 
-  // Download bill separately for AI (not attached to form)
   let billForAI = null;
   if (billFile) {
-    billForAI = await downloadFile(billFile.downloadUrl, billFile.permalink);
+    billForAI = await downloadFile(billFile.downloadUrl, billFile.permalink, billFile.id);
     billForAI.filename = billFile.name;
   }
 
   return { attachFiles, billFile: billForAI };
 }
-
 
 function scoreFile(name) {
   const n = name.toLowerCase();
@@ -158,47 +133,48 @@ function scoreFile(name) {
 
 function scoreSLD(n) {
   let s = 0;
-  if (n.includes('sld'))         s += 10;
-  if (n.includes('single line')) s += 10;
-  if (n.includes('electrical'))  s += 5;
-  if (n.includes('diagram'))     s += 3;
-  if (n.endsWith('.pdf'))        s += 2;
+  if (n.includes('sld'))          s += 10;
+  if (n.includes('single line'))  s += 10;
+  if (n.includes('electrical'))   s += 5;
+  if (n.includes('diagram'))      s += 3;
+  if (n.endsWith('.pdf'))         s += 2;
   return s;
 }
 
 function scoreSitePlan(n) {
   let s = 0;
-  if (n.includes('site'))        s += 10;
-  if (n.includes('plan'))        s += 5;
-  if (n.includes('aerial'))      s += 5;
-  if (n.includes('map'))         s += 3;
+  if (n.includes('site'))         s += 10;
+  if (n.includes('plan'))         s += 5;
+  if (n.includes('aerial'))       s += 5;
+  if (n.includes('map'))          s += 3;
   if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg')) s += 2;
   return s;
 }
 
 function scoreSpec(n) {
   let s = 0;
-  if (n.includes('spec'))        s += 10;
-  if (n.includes('datasheet'))   s += 8;
-  if (n.includes('data sheet'))  s += 8;
-  if (n.includes('ds3'))         s += 8;
+  if (n.includes('spec'))         s += 10;
+  if (n.includes('datasheet'))    s += 8;
+  if (n.includes('data sheet'))   s += 8;
+  if (n.includes('ds3'))          s += 8;
   if (n.includes('ja solar') || n.includes('jasolar')) s += 6;
-  if (n.includes('module'))      s += 5;
-  if (n.includes('inverter'))    s += 5;
-  if (n.includes('panel'))       s += 3;
-  if (n.endsWith('.pdf'))        s += 2;
+  if (n.includes('krack') || n.includes('k-rack'))     s += 6;
+  if (n.includes('module'))       s += 5;
+  if (n.includes('inverter'))     s += 5;
+  if (n.includes('panel'))        s += 3;
+  if (n.endsWith('.pdf'))         s += 2;
   return s;
 }
 
 function scoreBill(n) {
   let s = 0;
-  if (n.includes('bill'))        s += 10;
-  if (n.includes('invoice'))     s += 8;
-  if (n.includes('saskpower'))   s += 8;
-  if (n.includes('payment'))     s += 6;
-  if (n.includes('utility'))     s += 5;
-  if (n.includes('power'))       s += 4;
-  if (n.includes('img'))         s += 1; // likely a photo
+  if (n.includes('bill'))         s += 10;
+  if (n.includes('invoice'))      s += 8;
+  if (n.includes('saskpower'))    s += 8;
+  if (n.includes('payment'))      s += 6;
+  if (n.includes('utility'))      s += 5;
+  if (n.includes('power'))        s += 4;
+  if (n.includes('img'))          s += 1;
   if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg')) s += 1;
   return s;
 }
@@ -210,46 +186,59 @@ function findBestMatch(scored, type) {
   return candidates[0] || null;
 }
 
+async function downloadFile(downloadUrl, permalink, fileId) {
+  const token = await getZohoToken();
 
-// ─── File download ────────────────────────────────────────────────────────────
-
-async function downloadFile(downloadUrl, permalink) {
-  try {
-    const resp = await fetch(downloadUrl, { credentials: 'include' });
-    if (resp.ok) {
-      const ct = resp.headers.get('content-type') || '';
-      if (!ct.includes('text/html')) {
-        const blob = await resp.blob();
-        const arrayBuf = await blob.arrayBuffer();
-        const uint8 = new Uint8Array(arrayBuf);
-        const rawB64 = uint8ToBase64(uint8);
-        const actualMimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
-        const compressedB64 = await compressImageIfNeeded(rawB64, blob.type);
-        return { b64: compressedB64, filename: '', mimeType: actualMimeType || blob.type };
-      }
-    }
-  } catch(e) {}
-
-  if (permalink) {
+  // Try download_url with browser session
+  if (downloadUrl) {
     try {
-      const dlUrl = `${permalink}?download=true`;
-      const resp = await fetch(dlUrl, { credentials: 'include' });
+      const resp = await fetch(downloadUrl, { credentials: 'include' });
       if (resp.ok) {
         const ct = resp.headers.get('content-type') || '';
         if (!ct.includes('text/html')) {
-          const blob = await resp.blob();
-          const arrayBuf = await blob.arrayBuffer();
-          const uint8 = new Uint8Array(arrayBuf);
-          const rawB64 = uint8ToBase64(uint8);
-          const actualMimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
-          const compressedB64 = await compressImageIfNeeded(rawB64, blob.type);
-          return { b64: compressedB64, filename: '', mimeType: actualMimeType || blob.type };
+          return await blobToResult(resp);
+        }
+      }
+    } catch(e) {}
+  }
+
+  // Try WorkDrive API with token
+  if (fileId && token) {
+    try {
+      const resp = await fetch(
+        `https://www.zohoapis.com/workdrive/api/v1/files/${fileId}/content`,
+        { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
+      );
+      if (resp.ok) {
+        return await blobToResult(resp);
+      }
+    } catch(e) {}
+  }
+
+  // Try permalink
+  if (permalink) {
+    try {
+      const resp = await fetch(`${permalink}?download=true`, { credentials: 'include' });
+      if (resp.ok) {
+        const ct = resp.headers.get('content-type') || '';
+        if (!ct.includes('text/html')) {
+          return await blobToResult(resp);
         }
       }
     } catch(e) {}
   }
 
   throw new Error(`Could not download file`);
+}
+
+async function blobToResult(resp) {
+  const blob = await resp.blob();
+  const arrayBuf = await blob.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuf);
+  const rawB64 = uint8ToBase64(uint8);
+  const mimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
+  const compressedB64 = await compressImageIfNeeded(rawB64, blob.type);
+  return { b64: compressedB64, filename: '', mimeType: mimeType || blob.type };
 }
 
 function uint8ToBase64(uint8) {
@@ -259,35 +248,27 @@ function uint8ToBase64(uint8) {
 }
 
 async function compressImageIfNeeded(b64, mimeType) {
-  if (!mimeType || mimeType === 'application/pdf' || mimeType.includes('pdf')) return b64;
+  if (!mimeType || mimeType.includes('pdf')) return b64;
   if (!mimeType.startsWith('image/')) return b64;
-
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      let width = img.width;
-      let height = img.height;
+      let width = img.width, height = img.height;
       const maxDim = 1500;
       if (width > maxDim || height > maxDim) {
         const ratio = Math.min(maxDim / width, maxDim / height);
         width  = Math.round(width * ratio);
         height = Math.round(height * ratio);
       }
-      canvas.width  = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      const compressed = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-      resolve(compressed);
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7).split(',')[1]);
     };
     img.onerror = () => resolve(b64);
     img.src = `data:${mimeType};base64,${b64}`;
   });
 }
-
-
-// ─── Claude AI Extraction ─────────────────────────────────────────────────────
 
 function getMediaType(filename, mimeType) {
   if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
@@ -301,7 +282,6 @@ function getMediaType(filename, mimeType) {
 async function extractWithClaude(attachFiles, billFile, apiKey) {
   const content = [];
 
-  // Send bill first (most important for customer info)
   if (billFile) {
     const mt = getMediaType(billFile.filename, billFile.mimeType);
     if (mt === 'application/pdf') {
@@ -311,7 +291,6 @@ async function extractWithClaude(attachFiles, billFile, apiKey) {
     }
   }
 
-  // Send SLD for system specs
   if (attachFiles.sld) {
     const mt = getMediaType(attachFiles.sld.filename, attachFiles.sld.mimeType);
     if (mt === 'application/pdf') {
@@ -321,7 +300,6 @@ async function extractWithClaude(attachFiles, billFile, apiKey) {
     }
   }
 
-  // Send site plan
   if (attachFiles.siteplan) {
     const mt = getMediaType(attachFiles.siteplan.filename, attachFiles.siteplan.mimeType);
     if (mt === 'application/pdf') {
@@ -364,8 +342,8 @@ Extract ALL fields from these documents. Return ONLY raw JSON, nothing else.
 
 Rules:
 - Bill names are LAST, FIRST format — reverse them. "COTE, GASTON H." means first=GASTON, last=COTE, middle=H
-- person1_first must be ONLY the first name (e.g. GASTON), never full name
-- person1_last must be ONLY the last name (e.g. COTE), never full name
+- person1_first must be ONLY the first name, never the full name
+- person1_last must be ONLY the last name, never the full name
 - The FIRST person listed on the bill is person1, SECOND is person2
 - Mailing address is at the BOTTOM of the bill
 - Account number: strip all spaces
@@ -400,9 +378,6 @@ Rules:
   const m = raw.match(/\{[\s\S]*\}/);
   return JSON.parse(m ? m[0] : raw);
 }
-
-
-// ─── Merge data ───────────────────────────────────────────────────────────────
 
 function capitalize(str) {
   if (!str) return '';
