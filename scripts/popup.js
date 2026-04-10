@@ -81,14 +81,30 @@ async function runPermit() {
     if (specFile) { attachFiles.bill     = { ...specFile, filename: filesMeta.spec?.name  || 'specsheet.pdf' }; }
 
     // Step 3: Call Claude from popup context
-    showStatus('info', 'Reading documents with AI...');
-    const extractedData = await extractWithClaudeFromPopup(attachFiles, billFile, apiKey);
+    // showStatus('info', 'Reading documents with AI...');
+    // const extractedData = await extractWithClaudeFromPopup(attachFiles, billFile, apiKey);
 
-    // Step 4: Merge and store
-    const finalData = mergeDataInPopup(extractedData, dealData, attachFiles);
-    const { files: fileData, ...dataWithoutFiles } = finalData;
-    await chrome.storage.local.set({ permitData: dataWithoutFiles });
-    await chrome.storage.local.set({ permitFiles: fileData });
+    // // Step 4: Merge and store
+    // const finalData = mergeDataInPopup(extractedData, dealData, attachFiles);
+    // const { files: fileData, ...dataWithoutFiles } = finalData;
+    // await chrome.storage.local.set({ permitData: dataWithoutFiles });
+    // await chrome.storage.local.set({ permitFiles: fileData });
+
+    // Step 3: Send downloaded files to background for Claude processing
+    showStatus('info', 'Reading documents with AI...');
+    const processResponse = await chrome.runtime.sendMessage({
+      action:      'processFiles',
+      attachFiles: attachFiles,
+      billFile:    billFile,
+      dealData:    dealData,
+      apiKey:      apiKey
+    });
+
+    if (processResponse.error) {
+      showStatus('error', processResponse.error);
+      setLoading(false);
+      return;
+    }
 
     // Step 5: Open form
     showStatus('info', 'Opening SaskPower form...');

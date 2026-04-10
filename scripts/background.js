@@ -9,6 +9,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'runPermit') {
+    handleRunPermit(msg.dealData, msg.apiKey)
+      .then(result => sendResponse(result))
+      .catch(err  => sendResponse({ error: err.message }));
+    return true;
+  }
+  if (msg.action === 'processFiles') {
+    handleProcessFiles(msg.attachFiles, msg.billFile, msg.dealData, msg.apiKey)
+      .then(result => sendResponse(result))
+      .catch(err  => sendResponse({ error: err.message }));
+    return true;
+  }
+});
+
+async function handleProcessFiles(attachFiles, billFile, dealData, apiKey) {
+  const extractedData = await extractWithClaude(attachFiles, billFile, apiKey);
+  const finalData = mergeData(extractedData, dealData, attachFiles);
+  const { files: fileData, ...dataWithoutFiles } = finalData;
+  await chrome.storage.local.set({ permitData: dataWithoutFiles });
+  await chrome.storage.local.set({ permitFiles: fileData });
+  return { success: true };
+}
+
 async function handleRunPermit(dealData, apiKey) {
   const workdriveUrl = dealData.workdriveUrl;
   if (!workdriveUrl) throw new Error('No WorkDrive URL found on this deal.');
