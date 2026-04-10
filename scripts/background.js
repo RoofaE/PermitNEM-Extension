@@ -76,7 +76,7 @@ async function crawlWorkDrive(folderId, depth = 0) {
           permalink:   attrs.permalink    || '',
           mimeType:    ext === 'pdf' ? 'application/pdf' : (ext === 'png' ? 'image/png' : 'image/jpeg'),
         });
-        console.log(`PermitFlow: Found file — ${attrs.name}`);
+        console.log(`PermitFlow: Found file — ${attrs.name} | download_url: ${attrs.download_url ? 'YES' : 'NO'}`);
       }
     }
   }
