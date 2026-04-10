@@ -9,37 +9,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
 async function handleRunPermit(dealData, apiKey) {
   const workdriveUrl = dealData.workdriveUrl;
   if (!workdriveUrl) throw new Error('No WorkDrive URL found on this deal.');
   const folderId = extractFolderId(workdriveUrl);
   if (!folderId) throw new Error('Could not extract folder ID from WorkDrive URL.');
-  const files = await fetchPermitFiles(folderId);
-  const bill = await fetchBillForAI(folderId);
-  const extractedData = await extractWithClaude({ ...files, bill }, apiKey);
-  const finalData = mergeData(extractedData, dealData, files);
 
-  // Store files separately using session storage keys
-  // Split into separate storage calls to avoid quota
+  // Crawl entire WorkDrive folder recursively
+  console.log('PermitFlow: Crawling WorkDrive folder...');
+  const allFiles = await crawlWorkDrive(folderId);
+  console.log(`PermitFlow: Found ${allFiles.length} files total`);
+
+  // Identify and download the 3 files to attach + bill for AI
+  const { attachFiles, billFile } = await selectAndDownloadFiles(allFiles);
+
+  // Extract all permit data with Claude
+  const extractedData = await extractWithClaude(attachFiles, billFile, apiKey);
+
+  // Merge with CRM data
+  const finalData = mergeData(extractedData, dealData, attachFiles);
+
+  // Store in chrome.storage split to avoid quota
   const { files: fileData, ...dataWithoutFiles } = finalData;
-  
   await chrome.storage.local.set({ permitData: dataWithoutFiles });
   await chrome.storage.local.set({ permitFiles: fileData });
-  
+
   return { success: true };
 }
 
-async function fetchBillForAI(rootFolderId) {
-  const picsId = await findSubfolder(rootFolderId, 'Pics');
-  if (!picsId) throw new Error('Pics folder not found');
-  const billFoldId = await findSubfolder(picsId, 'Power Bill');
-  if (!billFoldId) throw new Error('Power Bill folder not found');
-  const billFile = await getFirstFile(billFoldId);
-  if (!billFile) throw new Error('No bill file found');
-  const file = await downloadFile(billFile.attributes?.download_url, billFile.attributes?.permalink);
-  file.filename = billFile.attributes?.name || 'bill.png';
-  return file;
-}
+
+// ─── WorkDrive crawler ────────────────────────────────────────────────────────
 
 function extractFolderId(url) {
   const m = url.match(/\/folder\/([a-zA-Z0-9]+)/);
@@ -63,24 +64,156 @@ async function workdriveList(folderId) {
   return json.data || [];
 }
 
-async function findSubfolder(parentId, name) {
-  const items = await workdriveList(parentId);
-  const found = items.find(i =>
-    i.attributes?.name?.toLowerCase() === name.toLowerCase() &&
-    i.attributes?.type === 'folder'
-  );
-  return found?.id || null;
+async function crawlWorkDrive(folderId, depth = 0) {
+  if (depth > 5) return []; // max depth safety
+  const items = await workdriveList(folderId);
+  const files = [];
+
+  for (const item of items) {
+    const attrs = item.attributes || {};
+    const isFolder = attrs.type === 'folder';
+    const name = (attrs.name || '').toLowerCase();
+
+    if (isFolder) {
+      // Recurse into subfolders
+      const subFiles = await crawlWorkDrive(item.id, depth + 1);
+      files.push(...subFiles);
+    } else {
+      // Only collect relevant file types
+      const ext = name.split('.').pop();
+      if (['pdf', 'png', 'jpg', 'jpeg'].includes(ext)) {
+        files.push({
+          id:           item.id,
+          name:         attrs.name || '',
+          ext:          ext,
+          downloadUrl:  attrs.download_url || '',
+          permalink:    attrs.permalink    || '',
+          size:         attrs.storage_info?.size_in_bytes || 0,
+        });
+        console.log(`PermitFlow: Found file — ${attrs.name}`);
+      }
+    }
+  }
+
+  return files;
 }
 
-async function getFirstFile(folderId) {
-  const items = await workdriveList(folderId);
-  const file = items.find(i => i.attributes?.type !== 'folder') || null;
-  if (file) console.log('FILE FOUND:', JSON.stringify(file));
-  return file;
+
+// ─── File selection ───────────────────────────────────────────────────────────
+
+async function selectAndDownloadFiles(allFiles) {
+  // Score each file to identify what it likely is
+  const scored = allFiles.map(f => ({
+    ...f,
+    score: scoreFile(f.name),
+  }));
+
+  // Find the best SLD, site plan, spec sheet, and bill
+  const sldFile      = findBestMatch(scored, 'sld');
+  const siteFile     = findBestMatch(scored, 'siteplan');
+  const specFile     = findBestMatch(scored, 'spec');
+  const billFile     = findBestMatch(scored, 'bill');
+
+  console.log('PermitFlow: SLD →',      sldFile?.name);
+  console.log('PermitFlow: Site plan →', siteFile?.name);
+  console.log('PermitFlow: Spec sheet →', specFile?.name);
+  console.log('PermitFlow: Bill →',      billFile?.name);
+
+  // Download the 3 files to attach (SLD, site plan, spec sheet)
+  const attachFiles = {};
+
+  if (sldFile) {
+    attachFiles.sld = await downloadFile(sldFile.downloadUrl, sldFile.permalink);
+    attachFiles.sld.filename = sldFile.name;
+  }
+  if (siteFile) {
+    attachFiles.siteplan = await downloadFile(siteFile.downloadUrl, siteFile.permalink);
+    attachFiles.siteplan.filename = siteFile.name;
+  }
+  if (specFile) {
+    attachFiles.bill = await downloadFile(specFile.downloadUrl, specFile.permalink);
+    attachFiles.bill.filename = specFile.name;
+  }
+
+  // Download bill separately for AI (not attached to form)
+  let billForAI = null;
+  if (billFile) {
+    billForAI = await downloadFile(billFile.downloadUrl, billFile.permalink);
+    billForAI.filename = billFile.name;
+  }
+
+  return { attachFiles, billFile: billForAI };
 }
+
+
+function scoreFile(name) {
+  const n = name.toLowerCase();
+  return {
+    sld:      scoreSLD(n),
+    siteplan: scoreSitePlan(n),
+    spec:     scoreSpec(n),
+    bill:     scoreBill(n),
+  };
+}
+
+function scoreSLD(n) {
+  let s = 0;
+  if (n.includes('sld'))         s += 10;
+  if (n.includes('single line')) s += 10;
+  if (n.includes('electrical'))  s += 5;
+  if (n.includes('diagram'))     s += 3;
+  if (n.endsWith('.pdf'))        s += 2;
+  return s;
+}
+
+function scoreSitePlan(n) {
+  let s = 0;
+  if (n.includes('site'))        s += 10;
+  if (n.includes('plan'))        s += 5;
+  if (n.includes('aerial'))      s += 5;
+  if (n.includes('map'))         s += 3;
+  if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg')) s += 2;
+  return s;
+}
+
+function scoreSpec(n) {
+  let s = 0;
+  if (n.includes('spec'))        s += 10;
+  if (n.includes('datasheet'))   s += 8;
+  if (n.includes('data sheet'))  s += 8;
+  if (n.includes('ds3'))         s += 8;
+  if (n.includes('ja solar') || n.includes('jasolar')) s += 6;
+  if (n.includes('module'))      s += 5;
+  if (n.includes('inverter'))    s += 5;
+  if (n.includes('panel'))       s += 3;
+  if (n.endsWith('.pdf'))        s += 2;
+  return s;
+}
+
+function scoreBill(n) {
+  let s = 0;
+  if (n.includes('bill'))        s += 10;
+  if (n.includes('invoice'))     s += 8;
+  if (n.includes('saskpower'))   s += 8;
+  if (n.includes('payment'))     s += 6;
+  if (n.includes('utility'))     s += 5;
+  if (n.includes('power'))       s += 4;
+  if (n.includes('img'))         s += 1; // likely a photo
+  if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg')) s += 1;
+  return s;
+}
+
+function findBestMatch(scored, type) {
+  const candidates = scored
+    .filter(f => f.score[type] > 0)
+    .sort((a, b) => b.score[type] - a.score[type]);
+  return candidates[0] || null;
+}
+
+
+// ─── File download ────────────────────────────────────────────────────────────
 
 async function downloadFile(downloadUrl, permalink) {
-  // Try download_url with browser session only (no token header)
   try {
     const resp = await fetch(downloadUrl, { credentials: 'include' });
     if (resp.ok) {
@@ -89,12 +222,14 @@ async function downloadFile(downloadUrl, permalink) {
         const blob = await resp.blob();
         const arrayBuf = await blob.arrayBuffer();
         const uint8 = new Uint8Array(arrayBuf);
-        return { b64: uint8ToBase64(uint8), filename: '', mimeType: blob.type };
+        const rawB64 = uint8ToBase64(uint8);
+        const actualMimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
+        const compressedB64 = await compressImageIfNeeded(rawB64, blob.type);
+        return { b64: compressedB64, filename: '', mimeType: actualMimeType || blob.type };
       }
     }
   } catch(e) {}
 
-  // Try permalink with browser session
   if (permalink) {
     try {
       const dlUrl = `${permalink}?download=true`;
@@ -105,14 +240,16 @@ async function downloadFile(downloadUrl, permalink) {
           const blob = await resp.blob();
           const arrayBuf = await blob.arrayBuffer();
           const uint8 = new Uint8Array(arrayBuf);
+          const rawB64 = uint8ToBase64(uint8);
           const actualMimeType = (blob.type && blob.type !== 'application/octet-stream') ? blob.type : null;
-          return { b64: compressedB64, filename: '', mimeType: actualMimeType };
+          const compressedB64 = await compressImageIfNeeded(rawB64, blob.type);
+          return { b64: compressedB64, filename: '', mimeType: actualMimeType || blob.type };
         }
       }
     } catch(e) {}
   }
 
-  throw new Error('Could not download file — all methods failed');
+  throw new Error(`Could not download file`);
 }
 
 function uint8ToBase64(uint8) {
@@ -121,105 +258,100 @@ function uint8ToBase64(uint8) {
   return btoa(binary);
 }
 
-async function fetchPermitFiles(rootFolderId) {
-  const files = {};
-  const errors = [];
+async function compressImageIfNeeded(b64, mimeType) {
+  if (!mimeType || mimeType === 'application/pdf' || mimeType.includes('pdf')) return b64;
+  if (!mimeType.startsWith('image/')) return b64;
 
-  try {
-    const permId = await findSubfolder(rootFolderId, 'Permitting');
-    if (permId) {
-      const elecId = await findSubfolder(permId, 'Electrical');
-      if (elecId) {
-        const sldFile = await getFirstFile(elecId);
-        if (sldFile) {
-          files.sld = await downloadFile(sldFile.attributes?.download_url, sldFile.attributes?.permalink);
-          files.sld.filename = sldFile.attributes?.name || 'sld.pdf';
-        }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      const maxDim = 1500;
+      if (width > maxDim || height > maxDim) {
+        const ratio = Math.min(maxDim / width, maxDim / height);
+        width  = Math.round(width * ratio);
+        height = Math.round(height * ratio);
       }
-      const permItems = await workdriveList(permId);
-
-      // Site plan — first image file in Permitting
-      const siteFile = permItems.find(i => {
-        const name = (i.attributes?.name || '').toLowerCase();
-        const type = i.attributes?.type;
-        return type !== 'folder' && (name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'));
-      });
-      if (siteFile) {
-        files.siteplan = await downloadFile(siteFile.attributes?.download_url, siteFile.attributes?.permalink);
-        files.siteplan.filename = siteFile.attributes?.name || 'siteplan.png';
-      }
-      
-      // Spec sheet — first PDF file in Permitting
-      const specFile = permItems.find(i => {
-        const name = (i.attributes?.name || '').toLowerCase();
-        const type = i.attributes?.type;
-        return type !== 'folder' && name.endsWith('.pdf');
-      });
-      if (specFile) {
-        files.bill = await downloadFile(specFile.attributes?.download_url, specFile.attributes?.permalink);
-        files.bill.filename = specFile.attributes?.name || 'specsheet.pdf';
-      }
-    }
-  } catch (e) {
-    errors.push('Permitting folder: ' + e.message);
-  }
-
-  const missing = ['sld', 'siteplan'].filter(k => !files[k]);
-  if (missing.length > 0) {
-    throw new Error(`Could not find: ${missing.join(', ')}. Check WorkDrive folder structure.\n${errors.join('\n')}`);
-  }
-  // spec sheet (bill) is optional — skip if not found
-
-  return files;
+      canvas.width  = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+      resolve(compressed);
+    };
+    img.onerror = () => resolve(b64);
+    img.src = `data:${mimeType};base64,${b64}`;
+  });
 }
 
-function getMediaType(filename) {
+
+// ─── Claude AI Extraction ─────────────────────────────────────────────────────
+
+function getMediaType(filename, mimeType) {
+  if (mimeType && mimeType !== 'application/octet-stream') return mimeType;
   const ext = (filename || '').split('.').pop().toLowerCase();
-  if (ext === 'pdf')               return 'application/pdf';
+  if (ext === 'pdf')                   return 'application/pdf';
   if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
-  if (ext === 'png')               return 'image/png';
-  if (ext === 'webp')              return 'image/webp';
-  return 'image/png';
+  if (ext === 'png')                   return 'image/png';
+  return 'image/jpeg';
 }
 
-async function extractWithClaude(files, apiKey) {
-  console.log('Files being sent to Claude:', Object.keys(files).map(k => `${k}: ${files[k]?.filename} (${files[k]?.mimeType})`));
+async function extractWithClaude(attachFiles, billFile, apiKey) {
   const content = [];
 
-  for (const key of ['bill', 'sld', 'siteplan']) {
-    const file = files[key];
-    const mt = getMediaType(file.filename);
+  // Send bill first (most important for customer info)
+  if (billFile) {
+    const mt = getMediaType(billFile.filename, billFile.mimeType);
     if (mt === 'application/pdf') {
-      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: file.b64 } });
+      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: billFile.b64 } });
     } else {
-      const imageMt = (file.mimeType && file.mimeType !== 'application/octet-stream')
-        ? file.mimeType
-        : mt;
-      const finalMt = file.mimeType || mt;
-      content.push({ type: 'image', source: { type: 'base64', media_type: finalMt, data: file.b64 } });
+      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: billFile.b64 } });
     }
   }
 
-  content.push({ type: 'text', text: `Extract fields from these solar permit documents. Return ONLY raw JSON.
+  // Send SLD for system specs
+  if (attachFiles.sld) {
+    const mt = getMediaType(attachFiles.sld.filename, attachFiles.sld.mimeType);
+    if (mt === 'application/pdf') {
+      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: attachFiles.sld.b64 } });
+    } else {
+      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: attachFiles.sld.b64 } });
+    }
+  }
+
+  // Send site plan
+  if (attachFiles.siteplan) {
+    const mt = getMediaType(attachFiles.siteplan.filename, attachFiles.siteplan.mimeType);
+    if (mt === 'application/pdf') {
+      content.push({ type: 'document', source: { type: 'base64', media_type: mt, data: attachFiles.siteplan.b64 } });
+    } else {
+      content.push({ type: 'image', source: { type: 'base64', media_type: mt, data: attachFiles.siteplan.b64 } });
+    }
+  }
+
+  content.push({ type: 'text', text: `You are analyzing solar installation documents for a SaskPower NEM permit application.
+Extract ALL fields from these documents. Return ONLY raw JSON, nothing else.
 
 {
   "num_modules": "6",
   "num_ds3h_inverters": "3",
   "total_inverter_kw": "3.150",
   "account_number": "50000240738",
-  "house_number": "123",
-  "street_name": "Example St",
+  "house_number": "350",
+  "street_name": "Zeman Cres",
   "city": "Saskatoon",
-  "postal_code": "S7K 0A1",
-  "person1_first": "JOHN",
-  "person1_middle_initial": "A",
-  "person1_last": "SMITH",
-  "person1_mailing_address": "123 Example St",
+  "postal_code": "S7K 7W9",
+  "person1_first": "GASTON",
+  "person1_middle_initial": "H",
+  "person1_last": "COTE",
+  "person1_mailing_address": "350 Zeman Cres",
   "person1_city": "Saskatoon",
   "has_second_person": true,
-  "person2_first": "JANE",
-  "person2_middle_initial": "B",
-  "person2_last": "SMITH",
+  "person2_first": "MICHELLE",
+  "person2_middle_initial": "M",
+  "person2_last": "COTE",
   "location_type": "city",
   "qtr_lsd": "",
   "section": "",
@@ -231,17 +363,17 @@ async function extractWithClaude(files, apiKey) {
 }
 
 Rules:
-- Bill names are LAST, FIRST format - you MUST reverse them. Example: "COTE, GASTON H." means person1_first=GASTON, person1_last=COTE, person1_middle_initial=H
-- person1_first must be ONLY the first name (e.g. GASTON), never the full name
-- person1_last must be ONLY the last name (e.g. COTE), never the full name
-- The FIRST person listed on the bill is person1, the SECOND person is person2
-- Two people are often listed on the bill - extract both
-- Mailing address is at BOTTOM of bill
-- Count DS3-H inverters from SLD
-- total_inverter_kw = count * 1.050 to 3 decimal places
+- Bill names are LAST, FIRST format — reverse them. "COTE, GASTON H." means first=GASTON, last=COTE, middle=H
+- person1_first must be ONLY the first name (e.g. GASTON), never full name
+- person1_last must be ONLY the last name (e.g. COTE), never full name
+- The FIRST person listed on the bill is person1, SECOND is person2
+- Mailing address is at the BOTTOM of the bill
 - Account number: strip all spaces
-- location_type: city / rural / firstnation
-- has_second_person: true if second person found on bill, else false` });
+- Count DS3-H micro inverters from SLD
+- total_inverter_kw = DS3-H count * 1.050, 3 decimal places
+- location_type: city for street address, rural for farm/acreage, firstnation for reserve
+- For rural: fill qtr_lsd, section, township, range, meridian
+- For firstnation: fill first_nation_name, reserve_name` });
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -252,9 +384,9 @@ Rules:
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
-      max_tokens: 800,
-      messages: [{ role: 'user', content }]
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 1000,
+      messages:   [{ role: 'user', content }]
     })
   });
 
@@ -269,24 +401,24 @@ Rules:
   return JSON.parse(m ? m[0] : raw);
 }
 
+
+// ─── Merge data ───────────────────────────────────────────────────────────────
+
 function capitalize(str) {
   if (!str) return '';
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 function mergeData(extracted, dealData, files) {
-  // console.log('EXTRACTED person1:', extracted.person1_first, extracted.person1_last);
-  // console.log('DEALDATA:', dealData.firstName, dealData.lastName);
   const isoDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
   const month = String(isoDate.getMonth() + 1).padStart(2, '0');
-  const day = String(isoDate.getDate()).padStart(2, '0');
-  const year = isoDate.getFullYear();
+  const day   = String(isoDate.getDate()).padStart(2, '0');
+  const year  = isoDate.getFullYear();
 
-  const fileData = {
-    sld:      { b64: files.sld.b64,      filename: files.sld.filename,      mimeType: files.sld.mimeType },
-    siteplan: { b64: files.siteplan.b64, filename: files.siteplan.filename, mimeType: files.siteplan.mimeType },
-    bill:     { b64: files.bill.b64,     filename: files.bill.filename,     mimeType: files.bill.mimeType }
-  };
+  const fileData = {};
+  if (files.sld)      fileData.sld      = { b64: files.sld.b64,      filename: files.sld.filename,      mimeType: files.sld.mimeType };
+  if (files.siteplan) fileData.siteplan = { b64: files.siteplan.b64, filename: files.siteplan.filename, mimeType: files.siteplan.mimeType };
+  if (files.bill)     fileData.bill     = { b64: files.bill.b64,     filename: files.bill.filename,     mimeType: files.bill.mimeType };
 
   return {
     ...extracted,
@@ -295,9 +427,8 @@ function mergeData(extracted, dealData, files) {
     person1_middle_initial:  (extracted.person1_middle_initial || '').toUpperCase(),
     person1_email:           dealData.email  || '',
     person1_phone:           dealData.phone  || '',
-    person1_mailing_address: dealData.streetAddress || `${extracted.house_number} ${extracted.street_name}`,
-    // person1_city:            dealData.city         || extracted.city || '',
-    person1_city: extracted.person1_city || extracted.city || dealData.city || '',
+    person1_mailing_address: extracted.person1_mailing_address || `${extracted.house_number} ${extracted.street_name}`,
+    person1_city:            extracted.person1_city || extracted.city || dealData.city || '',
     person1_postal:          extracted.postal_code || '',
     has_second_person:       extracted.has_second_person || false,
     person2_first:           extracted.person2_first          || '',
