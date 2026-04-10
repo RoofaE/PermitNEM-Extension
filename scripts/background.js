@@ -189,19 +189,6 @@ function findBestMatch(scored, type) {
 async function downloadFile(downloadUrl, permalink, fileId) {
   const token = await getZohoToken();
 
-  // Try download_url with browser session
-  if (downloadUrl) {
-    try {
-      const resp = await fetch(downloadUrl, { credentials: 'include' });
-      if (resp.ok) {
-        const ct = resp.headers.get('content-type') || '';
-        if (!ct.includes('text/html')) {
-          return await blobToResult(resp);
-        }
-      }
-    } catch(e) {}
-  }
-
   // Try WorkDrive API with token
   if (fileId && token) {
     try {
