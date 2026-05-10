@@ -1,6 +1,5 @@
 # PermitFlow Chrome Extension
 **SaskPower NEM permit automation**
-**Made By Roofa Etagiuri**
 
 One click in Zoho CRM → new tab opens → SaskPower form fills automatically → you review and submit.
 
